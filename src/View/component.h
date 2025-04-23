@@ -116,6 +116,7 @@ private:
     float value; // 0.0 to 1.0
     SDL_Color fillColor;
     SDL_Color backgroundColor;
+    bool isDragging;
     bool isDraggable;
     std::function<void(float)> onValueChanged;
 
@@ -181,6 +182,7 @@ private:
     bool hasScrollbar;
     std::function<void(int)> onSelectionChanged;
     std::function<void(int)> on2ClickSelectionChanged;
+    std::function<void(int)> onRightClickSelectionChanged;
 
 public:
     ListView(int x, int y, int w, int h);
@@ -191,15 +193,21 @@ public:
     void addItem(const std::string &item);
     void removeItem(int index);
     void clearItems();
+
     size_t size() const;
     std::string getItem(int index) const;
     const std::vector<std::string> &getItems() const;
     void setItems(const std::vector<std::string> &newItems);
+
     int getSelectedIndex() const;
     void setSelectedIndex(int index);
     void set2ClickSelectedIndex(int index);
+    void setRightClickSelectedIndex(int index);
+
     void setOnSelectionChanged(std::function<void(int)> callback);
     void setOn2ClickSelectionChanged(std::function<void(int)> callback);
+    void setOnRightClickSelectionChanged(std::function<void(int)> callback);
+
     void scroll(int amount);
 };
 

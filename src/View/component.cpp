@@ -346,7 +346,7 @@ void TextComponent::render(SDL_Renderer *renderer)
             switch (alignment)
             {
             case TextAlign::Left:
-                dstRect.x = bounds.x;
+                dstRect.x = bounds.x + 5;
                 break;
             case TextAlign::Center:
                 dstRect.x = bounds.x + (bounds.w - lineWidth) / 2;
@@ -358,7 +358,7 @@ void TextComponent::render(SDL_Renderer *renderer)
 
             SDL_RenderCopy(renderer, textTexture, nullptr, &dstRect);
 
-            y_offset += lineHeight;
+            y_offset += lineHeight - 5;
             SDL_DestroyTexture(textTexture);
             SDL_FreeSurface(textSurface);
         }
@@ -478,6 +478,7 @@ bool ProgressBar::handleEvent(SDL_Event *event)
 
             if (containsPoint(x, y))
             {
+                isDragging = true;
                 // Calculate new value based on click position
                 float newValue = static_cast<float>(x - bounds.x) / bounds.w;
                 // Clamp value between 0 and 1
@@ -500,10 +501,9 @@ bool ProgressBar::handleEvent(SDL_Event *event)
         {
             int x = event->motion.x;
 
-            // Check if drag started inside the component
-            if (containsPoint(x, event->motion.y) ||
-                (x >= bounds.x - 100 && x <= bounds.x + bounds.w + 100))
+            if (isDragging && (event->motion.state & SDL_BUTTON_LMASK))
             {
+                int x = event->motion.x;
 
                 // Calculate new value based on drag position, clamped to [0,1]
                 float newValue = static_cast<float>(x - bounds.x) / bounds.w;
@@ -516,6 +516,15 @@ bool ProgressBar::handleEvent(SDL_Event *event)
                 }
                 return true;
             }
+        }
+        break;
+    }
+    case SDL_MOUSEBUTTONUP:
+    {
+        if (event->button.button == SDL_BUTTON_LEFT)
+        {
+            isDragging = false; // ✅ End drag
+            return false;
         }
         break;
     }
@@ -657,19 +666,19 @@ bool ListView::handleEvent(SDL_Event *event)
     {
     case SDL_MOUSEBUTTONDOWN:
     {
-        if (event->button.button == SDL_BUTTON_LEFT)
+        int x = event->button.x;
+        int y = event->button.y;
+
+        if (containsPoint(x, y))
         {
-            int x = event->button.x;
-            int y = event->button.y;
+            // Calculate item height
+            int itemHeight = 30; // Should match the one in render
 
-            if (containsPoint(x, y))
+            // Calculate which item was clicked
+            int clickedIndex = firstVisibleIndex + (y - bounds.y) / itemHeight; // Make sure the index is valid
+            if (clickedIndex >= 0 && clickedIndex < static_cast<int>(items.size()))
             {
-                // Calculate item height
-                int itemHeight = 30; // Should match the one in render
-
-                // Calculate which item was clicked
-                int clickedIndex = firstVisibleIndex + (y - bounds.y) / itemHeight; // Make sure the index is valid
-                if (clickedIndex >= 0 && clickedIndex < static_cast<int>(items.size()))
+                if (event->button.button == SDL_BUTTON_LEFT)
                 {
                     if (event->button.clicks >= 2)
                     {
@@ -681,8 +690,13 @@ bool ListView::handleEvent(SDL_Event *event)
                     }
                     return true;
                 }
+                else if (event->button.button == SDL_BUTTON_RIGHT)
+                {
+                    setRightClickSelectedIndex(clickedIndex);
+                }
             }
         }
+
         break;
     }
     case SDL_MOUSEWHEEL:
@@ -824,10 +838,21 @@ void ListView::set2ClickSelectedIndex(int index)
     if (index >= -1 && index < static_cast<int>(items.size()))
     {
 
-        if (onSelectionChanged)
+        if (on2ClickSelectionChanged)
         {
             selectedIndex = index;
             on2ClickSelectionChanged(selectedIndex);
+        }
+    }
+}
+void ListView::setRightClickSelectedIndex(int index)
+{
+    if (index >= -1 && index < static_cast<int>(items.size()))
+    {
+        if (onRightClickSelectionChanged)
+        {
+            selectedIndex = index;
+            onRightClickSelectionChanged(selectedIndex);
         }
     }
 }
@@ -839,6 +864,10 @@ void ListView::setOnSelectionChanged(std::function<void(int)> callback)
 void ListView::setOn2ClickSelectionChanged(std::function<void(int)> callback)
 {
     on2ClickSelectionChanged = callback;
+}
+void ListView::setOnRightClickSelectionChanged(std::function<void(int)> callback)
+{
+    onRightClickSelectionChanged = callback;
 }
 
 void ListView::scroll(int amount)
@@ -1211,7 +1240,7 @@ Pagination::Pagination(int x, int y, int w, int h)
 {
     int buttonWidth = 70;
     int buttonHeight = h;
-    int labelWidth = 35;
+    int labelWidth = 40;
     int spacing = 5;
 
     prevButton = new Button(x, y, buttonWidth, buttonHeight, "Previous");

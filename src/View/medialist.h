@@ -12,6 +12,7 @@ private:
     Pagination *pagination;
     TextComponent *titleLabel;
     Button *openFolderButton;
+    ListView *contextMenu;
 
     std::vector<std::string> currentFilesName;
     int itemsPerPage;

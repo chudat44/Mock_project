@@ -13,11 +13,12 @@ MediaListView::MediaListView(MediaListController *controller)
     viewBounds = {240, 20, 500, 500};
     // Create components
     fileListView = new ListView(245, 50, 490, 430);
-    pagination = new Pagination(385, 480, 210, 30);
+    pagination = new Pagination(380, 480, 220, 30);
     // Create title label
     titleLabel = new TextComponent(450, 25, 90, 15, "Media List");
     // Create scan directory button
     openFolderButton = new Button(25, 485, 190, 30, "Open Folder");
+
 
     // Add components to view
     addComponent(fileListView);
@@ -45,6 +46,7 @@ void MediaListView::setMediaListController(MediaListController *controller)
                                         { onFileSelected(index); });
     fileListView->setOn2ClickSelectionChanged([this](int index)
                                               { onFile2ClickSelected(index); });
+                                              
 
     pagination->setOnPageChanged([this](int page)
                                  { setCurrentPage(page); });
@@ -208,7 +210,8 @@ void MediaListView::onFile2ClickSelected(int index)
 
 void MediaListView::showFileContextMenu(int x, int y, int fileIndex)
 {
-    // This would create a context menu at the given position
-    // Implementation depends on how you want to implement context menus
-    // For now, just a placeholder
+    contextMenu = new ListView(x, y, 80, 100);
+
+    contextMenu->addItem("Add media to");
+    contextMenu->addItem("Remove Media");
 }

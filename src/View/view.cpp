@@ -1,14 +1,14 @@
 #include "view.h"
 #include <iostream>
 
-
 #define CORNER_DETECTION_AREA 15
 
 // Main Window implementation
 
 MainWindow::MainWindow(int width, int height, std::string title)
     : width(width), height(height), title(title),
-      window(nullptr), exitRequested(false), is_dragging_corner(false)
+      window(nullptr), exitRequested(false), is_dragging_corner(false),
+      showingDialog(false), dialogTimer(0)
 {
 }
 MainWindow::~MainWindow()
@@ -123,14 +123,33 @@ void MainWindow::updatePolling(SDL_Event &event)
             SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW));
         }
     }
+
+    // Update dialog timer if showing
+    if (showingDialog)
+    {
+        dialogTimer--;
+        if (dialogTimer <= 0)
+        {
+            showingDialog = false;
+        }
+    }
+}
+void MainWindow::showDialog(const std::string &message)
+{
+    dialogMessage = message;
+    showingDialog = true;
+    dialogTimer = 180; // Show for about 3 seconds (60 frames/sec * 3)
+}
+
+bool MainWindow::isShowingDialog()
+{
+    return showingDialog;
 }
 
 // View Manager implementation
 ViewManager::ViewManager()
     : renderer(nullptr),
-      mainWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Media Player"),
-      showingDialog(false),
-      dialogTimer(0)
+      mainWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Media Player")
 {
 }
 
@@ -207,32 +226,11 @@ void ViewManager::handleEvents()
         playlistsListView->handleEvent(&event);
         metadataView->handleEvent(&event);
         // Handle dialog events first if showing
-        if (showingDialog)
-        {
-            if (event.type == SDL_MOUSEBUTTONDOWN)
-            {
-                // Any click dismisses dialog
-                showingDialog = false;
-                dialogTimer = 0;
-                continue;
-            }
-            // Don't process other events while dialog is showing
-            continue;
-        }
     }
 }
 
 void ViewManager::update()
 {
-    // Update dialog timer if showing
-    if (showingDialog)
-    {
-        dialogTimer--;
-        if (dialogTimer <= 0)
-        {
-            showingDialog = false;
-        }
-    }
 }
 
 void ViewManager::render()
@@ -256,7 +254,7 @@ void ViewManager::render()
         metadataView->render(renderer);
 
     // Render dialog if showing
-    if (showingDialog)
+    if (mainWindow.isShowingDialog())
     {
         // Dialog background
         SDL_SetRenderDrawColor(renderer, 200, 200, 200, 220);
@@ -284,12 +282,6 @@ void ViewManager::run()
     appController->run();
 }
 
-void ViewManager::showDialog(const std::string &message)
-{
-    dialogMessage = message;
-    showingDialog = true;
-    dialogTimer = 180; // Show for about 3 seconds (60 frames/sec * 3)
-}
 
 bool ViewManager::shouldExit() const
 {

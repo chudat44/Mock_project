@@ -27,6 +27,12 @@ private:
     bool is_dragging_corner;
     bool exitRequested;
 
+    
+    // Dialog properties
+    bool showingDialog;
+    std::string dialogMessage;
+    int dialogTimer;
+
 public:
     MainWindow(int width, int height, std::string title);
     ~MainWindow();
@@ -41,6 +47,8 @@ public:
 
     bool getExitRequest() const;
     SDL_Window *getWindow();
+    void showDialog(const std::string &message);
+    bool isShowingDialog();
 };
 
 class ViewManager : public ViewManagerInterface
@@ -58,10 +66,6 @@ private:
     std::unique_ptr<PlaylistsListView> playlistsListView;
     std::unique_ptr<MetadataView> metadataView;
 
-    // Dialog properties
-    bool showingDialog;
-    std::string dialogMessage;
-    int dialogTimer;
 
 public:
     ViewManager();
@@ -74,7 +78,6 @@ public:
     void update() override;
     void render() override;
     void run() override;
-    void showDialog(const std::string &message) override;
 
     // Additional methods
     bool shouldExit() const;

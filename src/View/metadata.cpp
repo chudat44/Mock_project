@@ -108,110 +108,111 @@ void MetadataView::showMetadata(const std::map<std::string, std::string> &metada
 
     // Title
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Title");
+        TextComponent *keyLabel = new TextComponent(765, yPos, 60, 30, "Title");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Title"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Title"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
         yPos += 35;
     }
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Artist");
+        TextComponent *keyLabel = new TextComponent(765, yPos, 60, 30, "Artist");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Artist"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Artist"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
         yPos += 35;
     }
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Album");
+        TextComponent *keyLabel = new TextComponent(765, yPos, 60, 30, "Album");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Album"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Album"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
         yPos += 35;
     }
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Comment");
+        TextComponent *keyLabel = new TextComponent(765, yPos, 60, 30, "Comment");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Comment"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Comment"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
         yPos += 35;
     }
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Genre");
+        TextComponent *keyLabel = new TextComponent(765, yPos, 60, 30, "Genre");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Genre"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Genre"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
         yPos += 35;
     }
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Year");
+        TextComponent *keyLabel = new TextComponent(765, yPos, 60, 30, "Year");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Year"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Year"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
         yPos += 35;
     }
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Track");
+        TextComponent *keyLabel = new TextComponent(765, yPos, 60, 30, "Track");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Track"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Track"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
         yPos += 35;
     }
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Bitrate");
+        TextComponent *keyLabel = new TextComponent(765, yPos, 60, 30, "Bitrate");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Bitrate"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Bitrate"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
         yPos += 35;
     }
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Channels");
+        TextComponent *keyLabel = new TextComponent(765, yPos, 60, 30, "Channels");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Channels"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Channels"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
         yPos += 35;
     }
     {
-        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Sample Rate");
+        TextComponent *keyLabel = new TextComponent(765, yPos-5, 60, 30, "Sample Rate");
+        keyLabel->setLines(2);
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Sample Rate"));
+        TextField *valueField = new TextField(850, yPos, 125, 30, metadata.at("Sample Rate"));
         valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
