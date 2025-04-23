@@ -42,6 +42,97 @@ bool UIComponent::containsPoint(int x, int y) const
             y >= bounds.y && y < bounds.y + bounds.h);
 }
 
+// Implementation for View class
+View::View() : active(false) {}
+
+View::~View()
+{
+    // Clean up all components
+    for (auto &component : components)
+    {
+        delete component;
+    }
+    components.clear();
+}
+
+// Render all the componenet
+void View::render(SDL_Renderer *renderer)
+{
+    // Set background for playlist area
+    SDL_SetRenderDrawColor(renderer, PANEL_COLOR.r, PANEL_COLOR.g, PANEL_COLOR.b, PANEL_COLOR.a);
+    SDL_RenderFillRect(renderer, &viewBounds);
+    // Panel border
+    SDL_SetRenderDrawColor(renderer, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, BORDER_COLOR.a);
+    SDL_RenderDrawRect(renderer, &viewBounds);
+    if (!active)
+        return;
+
+    // Render all components
+    for (auto &component : components)
+    {
+        if (component->isVisible())
+        {
+            component->render(renderer);
+        }
+    }
+}
+
+bool View::handleEvent(SDL_Event *event)
+{
+    if (!active)
+        return false;
+
+    // Handle events for all components in reverse order (top-most first)
+    for (auto it = components.rbegin(); it != components.rend(); ++it)
+    {
+        if ((*it)->isVisible() && (*it)->isEnabled())
+        {
+            if ((*it)->handleEvent(event))
+            {
+                return true; // Event was handled
+            }
+        }
+    }
+    return false;
+}
+
+void View::show()
+{
+    active = true;
+}
+
+void View::hide()
+{
+    active = false;
+}
+
+void View::addComponent(UIComponent *component)
+{
+    components.push_back(component);
+}
+
+void View::removeComponent(UIComponent *component)
+{
+    for (auto it = components.begin(); it != components.end(); ++it)
+    {
+        if (*it == component)
+        {
+            components.erase(it);
+            break;
+        }
+    }
+}
+
+bool View::isActive() const
+{
+    return active;
+}
+bool View::isInViewRect(int x, int y)
+{
+    return (x >= viewBounds.x && x < viewBounds.x + viewBounds.w &&
+            y >= viewBounds.y && y < viewBounds.y + viewBounds.h);
+}
+
 // Button implementation
 Button::Button(int x, int y, int w, int h, const std::string &buttonText)
     : TextComponent(x, y, w, h, buttonText), isHovered(false)

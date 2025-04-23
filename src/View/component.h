@@ -52,6 +52,31 @@ public:
     bool containsPoint(int x, int y) const;
 };
 
+// Main View class (parent for all views)
+class View
+{
+protected:
+    std::vector<UIComponent *> components;
+    bool active;
+    SDL_Rect viewBounds;
+
+public:
+    View();
+    virtual ~View();
+
+    virtual void render(SDL_Renderer *renderer);
+    virtual bool handleEvent(SDL_Event *event);
+
+    virtual void show();
+    virtual void hide();
+    virtual void update() = 0;
+
+    void addComponent(UIComponent *component);
+    void removeComponent(UIComponent *component);
+    bool isActive() const;
+    bool isInViewRect(int x, int y);
+};
+
 class TextComponent : public UIComponent
 {
 public:
