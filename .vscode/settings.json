@@ -142,7 +142,11 @@
     "stop_token": "cpp",
     "thread": "cpp",
     "filesystem": "cpp",
-    "chrono": "cpp"
+    "chrono": "cpp",
+    "any": "cpp",
+    "forward_list": "cpp",
+    "ranges": "cpp",
+    "valarray": "cpp"
   },
   "makefile.configureOnOpen": true,
   "C_Cpp.default.compilerPath": "C:/msys64/ucrt64/bin/g++.exe"

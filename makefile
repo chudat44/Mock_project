@@ -1,5 +1,6 @@
 # Makefile for Media Player Project
-
+# Detect OS
+OS := $(shell uname -s)
 # Compiler and flags
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra
@@ -7,15 +8,19 @@ DEBUGFLAGS = -g -O0 -DDEBUG
 RELEASEFLAGS = -O2 -DNDEBUG
 
 # Directories
-SRC_DIR = src
-BUILD_DIR = build
-RELEASE_BUILD_DIR = $(BUILD_DIR)/Build
-DEBUG_BUILD_DIR = $(BUILD_DIR)/Debug
-OBJ_DIR_RELEASE = $(RELEASE_BUILD_DIR)/src
-OBJ_DIR_DEBUG = $(DEBUG_BUILD_DIR)/src
+SRC_DIR 	= src
+BUILD_DIR 	= build
 
-LIBS        := -ltag -lSDL2 -lSDL2_test -lSDL2_ttf -lSDL2_image -lSDL2_mixer
+RELEASE_BUILD_DIR 	= $(BUILD_DIR)/Build
+DEBUG_BUILD_DIR 	= $(BUILD_DIR)/Debug
+OBJ_DIR_RELEASE 	= $(RELEASE_BUILD_DIR)/src
+OBJ_DIR_DEBUG 		= $(DEBUG_BUILD_DIR)/src
+
+ifneq (,$(findstring NT,$(OS)))
+LIBS        := -ltag -lSDL2 -lSDL2_test -lSDL2_ttf -lSDL2_image -lSDL2_mixer -lole32 -luuid -lsetupapi
 LIBDIRS     := -L/ucrt64/lib
+else 
+endif
 
 # Source files
 SRCS = $(wildcard $(SRC_DIR)/*.cpp) \
@@ -25,14 +30,14 @@ SRCS = $(wildcard $(SRC_DIR)/*.cpp) \
 
 # Object files
 OBJS_RELEASE = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR_RELEASE)/%.o,$(SRCS))
-OBJS_DEBUG = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR_DEBUG)/%.o,$(SRCS))
+OBJS_DEBUG 	 = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR_DEBUG)/%.o,$(SRCS))
 
 # Target executable
-TARGET_RELEASE = $(RELEASE_BUILD_DIR)/MediaPlayer.exe
-TARGET_DEBUG = $(DEBUG_BUILD_DIR)/MediaPlayer.exe
+TARGET_RELEASE 	= $(RELEASE_BUILD_DIR)/MediaPlayer.exe
+TARGET_DEBUG 	= $(DEBUG_BUILD_DIR)/MediaPlayer.exe
 
 # Include directories
-INCLUDES = -I$(SRC_DIR) -I$(SRC_DIR)/Core -I$(SRC_DIR)/View/Interface $(LIBDIRS) $(LIBS)
+INCLUDES = -I$(SRC_DIR) -I$(SRC_DIR)/Core -I$(SRC_DIR)/View/Interface
 
 # Default target
 all: release
@@ -59,11 +64,11 @@ $(OBJ_DIR_DEBUG)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR_DEBUG)
 
 # Link release executable
 $(TARGET_RELEASE): $(OBJS_RELEASE)
-	$(CXX) $(CXXFLAGS) $(RELEASEFLAGS) $^ $(INCLUDES) -o $@
+	$(CXX) $(CXXFLAGS) $(RELEASEFLAGS) $^ $(INCLUDES) -o $@ $(LIBDIRS) $(LIBS)
 
 # Link debug executable
 $(TARGET_DEBUG): $(OBJS_DEBUG)
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $^ $(INCLUDES) -o $@
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $^ $(INCLUDES) -o $@ $(LIBDIRS) $(LIBS)
 
 # Build targets
 release: $(TARGET_RELEASE)

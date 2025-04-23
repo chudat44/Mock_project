@@ -3,15 +3,7 @@
 
 #include <string>
 #include <map>
-#include <unordered_map>
 
-#include <taglib/fileref.h>
-#include <taglib/tag.h>
-#include <taglib/mpegfile.h>
-#include <taglib/mp4file.h>
-#include <taglib/flacfile.h>
-#include <taglib/vorbisfile.h>
-#include <taglib/wavfile.h>
 
 // Enum for media types
 enum class MediaType
@@ -19,45 +11,6 @@ enum class MediaType
     AUDIO,
     VIDEO,
     UNKNOWN
-};
-
-enum class AUDIO_CODEC_t
-{
-    mp3,
-    flac,
-    m4a,
-    ogg,
-    wv,
-    ape,
-    mka,
-    opus,
-    mpc,
-    tak,
-    alac,
-    amr,
-    ofr,
-    tta,
-    ra,
-    spx
-};
-
-enum class VIDEO_CODEC_t
-{
-    mkv,
-    webm,
-    mp4,
-    mov,
-    avi,
-    ogm,
-    m2ts,
-    ts,
-    mpg,
-    wmv,
-    mxf,
-    flv,
-    rm,
-    rmvb,
-    dv
 };
 
 class MediaFileModel
@@ -68,22 +21,23 @@ private:
     int duration; // in seconds
     MediaType type;
     std::map<std::string, std::string> metadata;
+    std::map<std::string, std::string> addMetadata;
 
 public:
     MediaFileModel() {};
     MediaFileModel(const std::string &path) : filepath(path), duration(0), type(MediaType::UNKNOWN)
     {
-        size_t lastSlash = path.find_last_of("/\\");
+        size_t lastSlash = std::string(path).find_last_of("/\\");
         if (lastSlash != std::string::npos)
-            filename = path.substr(lastSlash + 1);
+            filename = std::string(path).substr(lastSlash + 1);
         else
             filename = path;
     }
 
     virtual ~MediaFileModel() {};
 
-    const std::string& getFilename() const;
-    const std::string& getFilepath() const;
+    const std::string &getFilename() const;
+    const std::string &getFilepath() const;
     int getDuration() const;
     MediaType getType() const;
 
@@ -92,13 +46,12 @@ public:
 
     void setMetadata(const std::string &key, const std::string &value);
 
-    const std::string& getMetadata(const std::string &key) const;
+    const std::string getMetadata(const std::string &key) const;
 
-    const std::map<std::string, std::string>& getAllMetadata() const;
+    const std::map<std::string, std::string> &getAllMetadata() const;
 
-    virtual bool loadMetadata();
+    const std::map<std::string, std::string> &getAllAddMetadata() const;
 
-    virtual bool saveMetadata();
 };
 
 // Audio file class
@@ -108,10 +61,8 @@ public:
     AudioFileModel(const std::string &path) : MediaFileModel(path)
     {
         setType(MediaType::AUDIO);
-        loadMetadata();
     }
 };
-
 
 class VideoFileModel : public MediaFileModel
 {
@@ -119,10 +70,7 @@ public:
     VideoFileModel(const std::string &path) : MediaFileModel(path)
     {
         setType(MediaType::VIDEO);
-        loadMetadata();
     }
-
-    bool loadMetadata() override;
 };
 
 #endif // MEDIA_H

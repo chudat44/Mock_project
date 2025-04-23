@@ -1,5 +1,7 @@
 #include "playlist.h"
 
+#include <algorithm>
+
 namespace fs = std::filesystem;
 
 // PlaylistModel implementation
@@ -40,6 +42,7 @@ void PlaylistModel::removeMediaFile(const std::string &filepath)
     if (it != playlist.end())
         playlist.erase(it);
 }
+void PlaylistModel::clear() { playlist.clear(); }
 
 void PlaylistModel::setPlaylistName(const std::string &name) { this->name = name; }
 const std::string &PlaylistModel::getPlaylistName() const { return name; }

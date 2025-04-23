@@ -4,18 +4,16 @@
 #include "playlist.h"
 
 #include <mutex>
-// #include <mntent.h>
+#include <nlohmann/json.hpp>
 
 class MetadataManager
 {
 public:
-    std::shared_ptr<MediaFileModel> loadMetadata(const std::string &filepath);
 
-    bool saveMetadata(std::shared_ptr<MediaFileModel> file);
+    bool loadMetadata(std::shared_ptr<MediaFileModel> mediaFile);
 
-    void extractMetadata(std::shared_ptr<MediaFileModel> file);
+    bool saveMetadata(std::shared_ptr<MediaFileModel> mediaFile);
 };
-
 
 class MediaLibrary
 {
@@ -29,22 +27,19 @@ private:
     std::vector<std::string> supportedVideoExtensions = {
         "mp4", "avi", "mkv", "mov"};
 
-    bool isAudioFile(const std::string &path);
+    bool isAudioFile(std::filesystem::path &path);
 
-    bool isVideoFile(const std::string &path);
+    bool isVideoFile(std::filesystem::path &path);
 
 public:
     MediaLibrary() {}
 
-    void scanDirectory(const std::string &path);
+    void scanDirectory(std::filesystem::path &path);
 
-    void scanUSBDevice(const std::string &mountPoint);
+    void scanUSBDevice(std::filesystem::path &mountPoint);
 
+    std::shared_ptr<MediaFileModel> getMediaFile(int index) const;
     std::vector<std::shared_ptr<MediaFileModel>> getMediaFiles() const;
-
-    std::vector<std::shared_ptr<MediaFileModel>> getPagedMediaFiles(size_t page, size_t itemsPerPage = 25) const;
-
-    size_t getTotalPages(size_t itemsPerPage = 25) const;
 
     std::vector<std::shared_ptr<MediaFileModel>> searchMedia(const std::string &keyword) const;
 
@@ -55,100 +50,25 @@ public:
     void clear();
 };
 
-
 class PlaylistsManager
 {
 private:
     std::vector<std::shared_ptr<PlaylistModel>> playlists;
     std::mutex playlistsMutex;
-    const std::string PLAYLISTS_FILE = "playlists.dat";
 
 public:
-    void createPlaylist(const std::string &name);
+    bool createPlaylist(const std::string &name);
 
-    void deletePlaylist(std::shared_ptr<PlaylistModel> playlist);
+    bool deletePlaylist(std::shared_ptr<PlaylistModel> playlist);
 
     std::shared_ptr<PlaylistModel> getPlaylist(const std::string &name);
+    std::shared_ptr<PlaylistModel> getPlaylist(int index);
 
     std::vector<std::shared_ptr<PlaylistModel>> getAllPlaylists() const;
 
-    void savePlaylistsToFile();
+    void parsePlaylistToJson(nlohmann::json &js, std::shared_ptr<PlaylistModel> playlist);
 
-    void loadPlaylistsFromFile(MediaLibrary &library);
-};
-
-class USBManager
-{
-private:
-    std::vector<std::string> mountedDevices;
-
-    bool isMountPoint(const std::string &path);
-
-public:
-    // std::vector<std::string> detectUSBDevices()
-    // {
-    //     std::vector<std::string> devices;
-    //     FILE *mtab = setmntent("/proc/mounts", "r");
-    //     if (mtab)
-    //     {
-    //         struct mntent *mnt;
-    //         while ((mnt = getmntent(mtab)) != nullptr)
-    //         {
-    //             std::string fsname = mnt->mnt_fsname;
-    //             std::string dir = mnt->mnt_dir;
-
-    //             // Check if it's a USB device (simplified)
-    //             if (fsname.find("/dev/sd") != std::string::npos && isMountPoint(dir))
-    //             {
-    //                 devices.push_back(dir);
-    //             }
-    //         }
-    //         endmntent(mtab);
-    //     }
-    //     return devices;
-    // }
-
-    // bool mountDevice(const std::string &device)
-    // {
-    //     // In Linux, USB drives are often auto-mounted
-    //     // This is a simplified implementation that assumes the device is already mounted
-    //     if (std::find(mountedDevices.begin(), mountedDevices.end(), device) == mountedDevices.end())
-    //     {
-    //         mountedDevices.push_back(device);
-    //         return true;
-    //     }
-    //     return false;
-    // }
-
-    // bool unmountDevice(const std::string &device)
-    // {
-    //     auto it = std::find(mountedDevices.begin(), mountedDevices.end(), device);
-    //     if (it != mountedDevices.end())
-    //     {
-    //         mountedDevices.erase(it);
-    //         // In a real application, you'd call the umount command
-    //         // system(("umount " + device).c_str());
-    //         return true;
-    //     }
-    //     return false;
-    // }
-
-    // std::string getMountPoint(const std::string &device)
-    // {
-    //     // For simplicity, return the device itself as mount point
-    //     // In a real implementation, you'd parse /proc/mounts to find the actual mount point
-    //     return device;
-    // }
-
-    // New ********************
-
-    std::vector<std::string> detectUSBDevices();
-
-    bool mountDevice(const std::string &device);
-
-    bool unmountDevice(const std::string &device);
-
-    std::string getMountPoint(const std::string &device);
+    void loadPlaylistFromJson(nlohmann::json &js);
 };
 
 #endif // MANAGEMENT_CONTROLLER_H

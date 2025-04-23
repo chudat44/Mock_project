@@ -10,9 +10,9 @@
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "environment": [],
-      "externalConsole": false,
+      "externalConsole": true,
       "MIMode": "gdb",
-      "miDebuggerPath": "gdb",
+      "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
       "setupCommands": [
         {
           "description": "Enable pretty-printing for gdb",
@@ -38,7 +38,7 @@
       "environment": [],
       "externalConsole": false,
       "MIMode": "gdb",
-      "miDebuggerPath": "gdb",
+      "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
       "setupCommands": [
         {
           "description": "Enable pretty-printing for gdb",
@@ -56,7 +56,7 @@
       "stopAtEntry": false,
       "externalConsole": true,
       "cwd": "d:/Autosar/Mock_project/Mock_project",
-      "program": "d:/Autosar/Mock_project/Mock_project/build/Debug/outDebug",
+      "program": "d:/Autosar/Mock_project/Mock_project/build/Release/outRelease",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [

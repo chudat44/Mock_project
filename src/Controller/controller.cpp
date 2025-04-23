@@ -1,25 +1,17 @@
 #include "controller.h"
-
 #include <iostream>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+namespace fs = std::filesystem;
+
+const std::string playlistsFilePath = "data/playlist/index.json";
+const std::string scanDirFilePath = "data/scan_dir/dir.json";
 
 // ApplicationController implementation
-ApplicationController::ApplicationController(
-    ViewManagerInterface *vm,
-    std::shared_ptr<MediaLibrary> library,
-    std::shared_ptr<PlaylistsManager> playlists,
-    std::shared_ptr<USBManager> usb,
-    std::shared_ptr<MetadataManager> metadata) : Controller(vm),
-                                                 mediaLibrary(library),
-                                                 playlistsManager(playlists),
-                                                 usbManager(usb),
-                                                 metadataManager(metadata),
-                                                 applicationRunning(false)
+ApplicationController::ApplicationController(ViewManagerInterface *vm)
+    : viewManager(vm), applicationRunning(false)
 {
-    // Create child controllers
-    playerController = std::make_unique<PlayerController>(vm);
-    playlistController = std::make_unique<PlaylistController>(vm, playlists, library);
-    usbController = std::make_unique<USBController>(vm, usb, library);
-    metadataController = std::make_unique<MetadataController>(vm, metadata);
 }
 
 ApplicationController::~ApplicationController()
@@ -31,157 +23,105 @@ ApplicationController::~ApplicationController()
     }
 }
 
-void ApplicationController::initialize()
+bool ApplicationController::initialize(MediaListInterface *mlView, PlayerInterface *plView,
+                                       PlaylistsListInterface *pllView, MetadataInterface *mdView)
 {
-    // Initialize SDL subsystems if not already initialized
-    if (SDL_WasInit(SDL_INIT_AUDIO) == 0)
+    std::cout << "Initializing application..." << std::endl;
+
+    try
     {
-        SDL_InitSubSystem(SDL_INIT_AUDIO);
-    }
+        // Initialize controllers with appropriate views and models
+        playerController = std::make_unique<PlayerController>(plView);
+        playlistController = std::make_unique<PlaylistsListController>(pllView);
+        mediaListController = std::make_unique<MediaListController>(mlView);
+        metadataController = std::make_unique<MetadataController>(mdView);
 
-    // Initialize controllers
-    playerController->initialize();
-    usbController->initialize();
-
-    // Load saved playlists
-    playlistController->loadAllPlaylists();
-
-    // Set default directory to current directory
-    char cwd[FILENAME_MAX];
-    if (getcwd(cwd, sizeof(cwd)) != NULL)
-    {
-        currentDirectory = std::string(cwd);
-        loadDirectory(currentDirectory);
-    }
-    else
-    {
-        // Default to home directory if current directory can't be determined
-        currentDirectory = getenv("HOME");
-        loadDirectory(currentDirectory);
-    }
-
-    applicationRunning = true;
-}
-
-void ApplicationController::handleUserCommand(UserCommand cmd)
-{
-    switch (cmd)
-    {
-    case UserCommand::PLAY:
-        playerController->play();
-        break;
-    case UserCommand::PAUSE:
-        playerController->pause();
-        break;
-    case UserCommand::STOP:
-        playerController->stop();
-        break;
-    case UserCommand::NEXT:
-        playerController->next();
-        break;
-    case UserCommand::PREVIOUS:
-        playerController->previous();
-        break;
-    case UserCommand::VOLUME_UP:
-        playerController->volumeUp();
-        break;
-    case UserCommand::VOLUME_DOWN:
-        playerController->volumeDown();
-        break;
-    case UserCommand::SEEK_FORWARD:
-        playerController->seekForward();
-        break;
-    case UserCommand::SEEK_BACKWARD:
-        playerController->seekBackward();
-        break;
-    case UserCommand::EXIT:
-        exit();
-        break;
-    default:
-        break;
-    }
-}
-
-void ApplicationController::handleUserInput(const SDL_Event &event)
-{
-    // Handle keyboard shortcuts
-    if (event.type == SDL_KEYDOWN)
-    {
-        switch (event.key.keysym.sym)
+        // Initialize controllers
+        if (!playerController->initialize())
         {
-        case SDLK_SPACE:
-            if (playerController->isMediaPlaying() && !playerController->isMediaPaused())
-            {
-                playerController->pause();
-            }
-            else
-            {
-                playerController->play();
-            }
-            break;
-        case SDLK_RIGHT:
-            if (SDL_GetModState() & KMOD_CTRL)
-            {
-                playerController->next();
-            }
-            else
-            {
-                playerController->seekForward();
-            }
-            break;
-        case SDLK_LEFT:
-            if (SDL_GetModState() & KMOD_CTRL)
-            {
-                playerController->previous();
-            }
-            else
-            {
-                playerController->seekBackward();
-            }
-            break;
-        case SDLK_UP:
-            playerController->volumeUp();
-            break;
-        case SDLK_DOWN:
-            playerController->volumeDown();
-            break;
-        case SDLK_ESCAPE:
-            // Handle escape key for navigation
-            break;
+            std::cerr << "Failed to initialize player controller!" << std::endl;
+            return false;
         }
+
+        // Load saved playlists
+        playlistController->loadAllPlaylists();
+
+        // Callback init
+        playlistController->setOnPlaylistSelectedCallback(
+            [this](std::shared_ptr<PlaylistModel> playlist)
+            {
+                mediaListController->loadPlaylist(playlist);
+            });
+        playlistController->setOnPlaylistPlayCallback(
+            [this](std::shared_ptr<PlaylistModel> playlist)
+            {
+                mediaListController->loadPlaylist(playlist);
+                metadataController->preloadMetadata(playlist->getAllMediaFiles());
+                playerController->playPlaylist(playlist->getAllMediaFiles());
+            });
+
+        mediaListController->setOnMediaSelectedCallback(
+            [this](std::shared_ptr<MediaFileModel> media)
+            {
+                metadataController->loadMetadata(media);
+            });
+        mediaListController->setOnMediaPlayCallback(
+            [this](const std::vector<std::shared_ptr<MediaFileModel>> &playlist, int index)
+            {
+                metadataController->preloadMetadata(playlist);
+                metadataController->loadMetadata(playlist[index]); // must load first
+                playerController->playPlaylist(playlist, index);
+            });
+        mediaListController->setOnOtherPlaylistCallback(
+            [this](const std::string &name)
+            {
+                for (auto &playlist : playlistController->getAllPlaylists())
+                {
+                    if (playlist->getPlaylistName() == name)
+                        return playlist;
+                }
+                return std::shared_ptr<PlaylistModel>(nullptr);
+            });
+
+        applicationRunning = true;
+        std::cout << "Application initialized successfully!" << std::endl;
+        return true;
     }
-}
-
-void ApplicationController::loadDirectory(const std::string &path)
-{
-    std::lock_guard<std::mutex> lock(controllerMutex);
-    currentDirectory = path;
-    mediaLibrary->scanDirectory(path);
-
-    // Notify views to update
-    if (viewManager)
+    catch (const std::exception &e)
     {
-        viewManager->update();
+        std::cerr << "Error during initialization: " << e.what() << std::endl;
+        return false;
     }
-}
-
-void ApplicationController::refreshCurrentDirectory()
-{
-    loadDirectory(currentDirectory);
-}
-
-std::vector<std::shared_ptr<MediaFileModel>> ApplicationController::searchMedia(const std::string &query)
-{
-    std::lock_guard<std::mutex> lock(controllerMutex);
-    return mediaLibrary->searchMedia(query);
 }
 
 void ApplicationController::run()
 {
-    applicationRunning = true;
+    if (!applicationRunning)
+    {
+        std::cerr << "Cannot run application: not initialized!" << std::endl;
+        return;
+    }
 
-    // Main application loop would be here in a real application
-    // but this will be handled by the SDL event loop and view manager
+    std::cout << "Starting application main loop..." << std::endl;
+
+    // Main application loop
+    while (applicationRunning)
+    {
+        // Let view manager handle events and rendering
+        viewManager->handleEvents();
+
+        // Check if application should exit
+        if (viewManager->shouldExit())
+        {
+            applicationRunning = false;
+        }
+
+        // Render everything
+        viewManager->render();
+
+        // Prevent CPU overuse
+        SDL_Delay(16); // ~60 fps
+    }
 }
 
 void ApplicationController::exit()
@@ -190,7 +130,6 @@ void ApplicationController::exit()
 
     // Clean up controllers
     playerController->shutdown();
-    usbController->shutdown();
 
     // Save data
     playlistController->saveAllPlaylists();
@@ -198,142 +137,19 @@ void ApplicationController::exit()
     // Additional cleanup if needed
 }
 
-void ApplicationController::navigateToMainMenu() {
-    std::lock_guard<std::mutex> lock(controllerMutex);
-    
-    // Log navigation action
-    std::cout << "Navigating to main menu" << std::endl;
-    
-    // Save any necessary state before changing views
-    if (viewManager) {
-        // Change the view state to main menu
-        viewManager->changeState(ViewState::MAIN_MENU);
-    } else {
-        std::cerr << "Error: View manager not initialized!" << std::endl;
-    }
-}
-
-void ApplicationController::navigateToMediaList() {
-    std::lock_guard<std::mutex> lock(controllerMutex);
-    
-    // Log navigation action
-    std::cout << "Navigating to media list" << std::endl;
-    
-    // Make sure we have at least some media files loaded
-    if (mediaLibrary && mediaLibrary->getMediaFiles().empty()) {
-        // If no directory is loaded yet, load the current directory
-        if (currentDirectory.empty()) {
-            currentDirectory = "."; // Default to current directory
-        }
-        
-        // Load the media files from the current directory
-        mediaLibrary->scanDirectory(currentDirectory);
-        
-        // If still empty, show a message
-        if (mediaLibrary->getMediaFiles().empty()) {
-            if (viewManager) {
-                viewManager->showDialog("No media files found in the current directory.");
-            }
-            // Still proceed to the view so user can navigate to other directories
-        }
-    }
-    
-    // Change the view state to media list
-    if (viewManager) {
-        viewManager->changeState(ViewState::MEDIA_LIST);
-    } else {
-        std::cerr << "Error: View manager not initialized!" << std::endl;
-    }
-}
-
-void ApplicationController::navigateToPlaylistsList() {
-    std::lock_guard<std::mutex> lock(controllerMutex);
-    
-    // Log navigation action
-    std::cout << "Navigating to playlists menu" << std::endl;
-    
-    // Make sure the playlist controller is initialized
-    if (!playlistController) {
-        std::cerr << "Error: Playlist controller not initialized!" << std::endl;
-        return;
-    }
-    
-    // Update the playlists list before showing it
-    if (playlistsManager) {
-        // Load playlists if they haven't been loaded yet
-        if (playlistsManager->getAllPlaylists().empty()) {
-            playlistsManager->loadPlaylistsFromFile(*mediaLibrary);
-        }
-        
-        // Update the playlist controller with current playlists
-        playlistController->loadAllPlaylists();
-    }
-    
-    // Change the view state to playlists menu
-    if (viewManager) {
-        viewManager->changeState(ViewState::PLAYLIST_MENU);
-    } else {
-        std::cerr << "Error: View manager not initialized!" << std::endl;
-    }
-}
-
-void ApplicationController::navigateToUSBDevices() {
-    std::lock_guard<std::mutex> lock(controllerMutex);
-    
-    // Log navigation action
-    std::cout << "Navigating to USB devices" << std::endl;
-    
-    // Make sure the USB controller is initialized
-    if (!usbController) {
-        std::cerr << "Error: USB controller not initialized!" << std::endl;
-        return;
-    }
-    
-    // Check if USB manager is available
-    if (!usbManager) {
-        std::cerr << "Error: USB manager not initialized!" << std::endl;
-        if (viewManager) {
-            viewManager->showDialog("USB manager not available. Cannot detect USB devices.");
-        }
-        return;
-    }
-    
-    try {
-        // Trigger USB detection
-        usbController->detectUSBDevices();
-        
-        // This might take a moment, so we could show a loading indicator
-        // For now, just add a small delay to simulate detection
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        
-        // Change the view state to USB devices
-        if (viewManager) {
-            viewManager->changeState(ViewState::USB_DEVICES);
-        } else {
-            std::cerr << "Error: View manager not initialized!" << std::endl;
-        }
-    } catch (const std::exception& e) {
-        // Handle any errors that occur during USB detection
-        std::cerr << "Error detecting USB devices: " << e.what() << std::endl;
-        if (viewManager) {
-            viewManager->showDialog("Error detecting USB devices: " + std::string(e.what()));
-        }
-    }
-}
-
 PlayerController *ApplicationController::getPlayerController() const
 {
     return playerController.get();
 }
 
-PlaylistController *ApplicationController::getPlaylistController() const
+MediaListController *ApplicationController::getMediaListController() const
 {
-    return playlistController.get();
+    return mediaListController.get();
 }
 
-USBController *ApplicationController::getUSBController() const
+PlaylistsListController *ApplicationController::getPlaylistsListController() const
 {
-    return usbController.get();
+    return playlistController.get();
 }
 
 MetadataController *ApplicationController::getMetadataController() const
@@ -341,58 +157,26 @@ MetadataController *ApplicationController::getMetadataController() const
     return metadataController.get();
 }
 
-std::shared_ptr<MediaLibrary> ApplicationController::getMediaLibrary() const
+// PlaylistsListController implementation
+PlaylistsListController::PlaylistsListController(
+    PlaylistsListInterface *plI) : playlistsListView(plI)
 {
-    return mediaLibrary;
+    playlistsManager = std::make_unique<PlaylistsManager>();
 }
 
-std::shared_ptr<PlaylistsManager> ApplicationController::getPlaylistsManager() const
-{
-    return playlistsManager;
-}
-
-// PlaylistController implementation
-PlaylistController::PlaylistController(
-    ViewManagerInterface *vm,
-    std::shared_ptr<PlaylistsManager> playlists,
-    std::shared_ptr<MediaLibrary> library) : Controller(vm), playlistsManager(playlists), mediaLibrary(library),
-                                             playlistsListView(nullptr), playlistView(nullptr)
-{
-}
-
-void PlaylistController::setPlaylistsListView(PlaylistsListInterface *view)
+void PlaylistsListController::setPlaylistsListView(PlaylistsListInterface *view)
 {
     playlistsListView = view;
 }
 
-void PlaylistController::setPlaylistView(PlaylistInterface *view)
-{
-    playlistView = view;
-}
-
-void PlaylistController::createPlaylist(const std::string &name)
+void PlaylistsListController::createPlaylist(const std::string &name)
 {
     std::lock_guard<std::mutex> lock(playlistMutex);
     playlistsManager->createPlaylist(name);
     updatePlaylistsListView();
 }
 
-void PlaylistController::deletePlaylist(const std::string &name)
-{
-    std::lock_guard<std::mutex> lock(playlistMutex);
-    auto playlist = playlistsManager->getPlaylist(name);
-    if (playlist)
-    {
-        playlistsManager->deletePlaylist(playlist);
-        if (currentPlaylist && currentPlaylist->getPlaylistName() == name)
-        {
-            currentPlaylist = nullptr;
-        }
-        updatePlaylistsListView();
-    }
-}
-
-void PlaylistController::deletePlaylist(int index)
+void PlaylistsListController::deletePlaylist(int index)
 {
     std::lock_guard<std::mutex> lock(playlistMutex);
     auto playlists = playlistsManager->getAllPlaylists();
@@ -400,15 +184,16 @@ void PlaylistController::deletePlaylist(int index)
     {
         auto playlist = playlists[index];
         playlistsManager->deletePlaylist(playlist);
-        if (currentPlaylist && currentPlaylist == playlist)
+        if (index == currentPlaylistIndex)
         {
-            currentPlaylist = nullptr;
+            currentPlaylistIndex = -1;
+            onPlaylistSelectedCallback(std::make_shared<PlaylistModel>(nullptr));
         }
         updatePlaylistsListView();
     }
 }
 
-void PlaylistController::renamePlaylist(const std::string &oldName, const std::string &newName)
+void PlaylistsListController::renamePlaylist(const std::string &oldName, const std::string &newName)
 {
     std::lock_guard<std::mutex> lock(playlistMutex);
     auto playlist = playlistsManager->getPlaylist(oldName);
@@ -420,141 +205,111 @@ void PlaylistController::renamePlaylist(const std::string &oldName, const std::s
     }
 }
 
-void PlaylistController::loadAllPlaylists()
+void PlaylistsListController::loadAllPlaylists()
 {
     std::lock_guard<std::mutex> lock(playlistMutex);
-    // This would call playlistsManager->loadPlaylistsFromFile() in a real implementation
+
+    // Load playlist from file
+    if (!fs::exists(playlistsFilePath))
+    {
+        std::cerr << "Playlists data File does not exist. No playlists found.\n";
+        return;
+    }
+
+    std::ifstream file(playlistsFilePath);
+
+    if (!file.is_open())
+    {
+        std::cerr << "Failed to open file";
+    }
+    json indexJson;
+    try
+    {
+        file >> indexJson;
+    }
+    catch (const json::parse_error &e)
+    {
+        std::cerr << "JSON parsing failed at byte " << e.byte << ": " << e.what() << "\n";
+    }
+
+    // Pass json object from file index
+    for (const auto &item : indexJson)
+    {
+        std::string name = item["name"];
+        std::string file = item["file"];
+
+        std::ifstream in("data/playlists/" + file);
+        if (!in.is_open())
+            continue;
+
+        json content;
+        in >> content;
+
+        playlistsManager->loadPlaylistFromJson(content);
+    }
+
     updatePlaylistsListView();
 }
 
-void PlaylistController::loadPlaylist(const std::string &name)
+void PlaylistsListController::moveItemUp(int index)
 {
     std::lock_guard<std::mutex> lock(playlistMutex);
-    currentPlaylist = playlistsManager->getPlaylist(name);
-    updatePlaylistView();
-}
-
-void PlaylistController::loadPlaylist(int index)
-{
-    std::lock_guard<std::mutex> lock(playlistMutex);
-    auto playlists = playlistsManager->getAllPlaylists();
-    if (index >= 0 && index < playlists.size())
-    {
-        currentPlaylist = playlists[index];
-        updatePlaylistView();
-    }
-}
-
-void PlaylistController::addToPlaylist(const std::string &playlistName, std::shared_ptr<MediaFileModel> file)
-{
-    std::lock_guard<std::mutex> lock(playlistMutex);
-    auto playlist = playlistsManager->getPlaylist(playlistName);
-    if (playlist)
-    {
-        playlist->addMediaFile(file);
-        saveAllPlaylists();
-        if (currentPlaylist && currentPlaylist->getPlaylistName() == playlistName)
-        {
-            updatePlaylistView();
-        }
-    }
-}
-
-void PlaylistController::addToCurrentPlaylist(std::shared_ptr<MediaFileModel> file)
-{
-    std::lock_guard<std::mutex> lock(playlistMutex);
-    if (currentPlaylist)
-    {
-        currentPlaylist->addMediaFile(file);
-        saveAllPlaylists();
-        updatePlaylistView();
-    }
-}
-
-void PlaylistController::removeFromPlaylist(const std::string &playlistName, int index)
-{
-    std::lock_guard<std::mutex> lock(playlistMutex);
-    auto playlist = playlistsManager->getPlaylist(playlistName);
-    if (playlist && index >= 0 && index < playlist->size())
-    {
-        playlist->removeMediaFile(index);
-        saveAllPlaylists();
-        if (currentPlaylist && currentPlaylist->getPlaylistName() == playlistName)
-        {
-            updatePlaylistView();
-        }
-    }
-}
-
-void PlaylistController::removeFromCurrentPlaylist(int index)
-{
-    std::lock_guard<std::mutex> lock(playlistMutex);
-    if (currentPlaylist && index >= 0 && index < currentPlaylist->size())
-    {
-        currentPlaylist->removeMediaFile(index);
-        saveAllPlaylists();
-        updatePlaylistView();
-    }
-}
-
-void PlaylistController::moveItemUp(int index)
-{
-    std::lock_guard<std::mutex> lock(playlistMutex);
-    if (currentPlaylist && index > 0 && index < currentPlaylist->size())
+    if (index > 0 && index < playlistsManager->getAllPlaylists().size())
     {
         // This would swap the item at index with the one at index-1
         // Since this is not implemented in your model class, we'd add this functionality here
-        auto files = currentPlaylist->getAllMediaFiles(); // Get a copy
-        if (index > 0 && index < files.size())
+        auto playlists = playlistsManager->getAllPlaylists(); // Get a copy
+        if (index > 0 && index < playlists.size())
         {
-            std::swap(files[index], files[index - 1]);
+            std::swap(playlists[index], playlists[index - 1]);
 
-            // Recreate playlist with new order
-            auto name = currentPlaylist->getPlaylistName();
-            playlistsManager->deletePlaylist(currentPlaylist);
-            playlistsManager->createPlaylist(name);
-            currentPlaylist = playlistsManager->getPlaylist(name);
+            // // Recreate playlist with new order
+            // auto name = currentPlaylist->getPlaylistName();
+            // playlistsManager->deletePlaylist(currentPlaylist);
+            // playlistsManager->createPlaylist(name);
+            // currentPlaylist = playlistsManager->getPlaylist(name);
 
-            for (auto &file : files)
-            {
-                currentPlaylist->addMediaFile(file);
-            }
+            // for (auto &file : files)
+            // {
+            //     currentPlaylist->addMediaFile(file);
+            // }
 
             saveAllPlaylists();
-            updatePlaylistView();
+            updatePlaylistsListView();
         }
     }
 }
 
-void PlaylistController::moveItemDown(int index)
+void PlaylistsListController::moveItemDown(int index)
 {
     std::lock_guard<std::mutex> lock(playlistMutex);
-    if (currentPlaylist && index >= 0 && index < currentPlaylist->size() - 1)
+    if (index > 0 && index < playlistsManager->getAllPlaylists().size())
     {
-        // This would swap the item at index with the one at index+1
-        auto files = currentPlaylist->getAllMediaFiles(); // Get a copy
-        if (index >= 0 && index < files.size() - 1)
+        // This would swap the item at index with the one at index-1
+        // Since this is not implemented in your model class, we'd add this functionality here
+        auto playlists = playlistsManager->getAllPlaylists(); // Get a copy
+        if (index > 0 && index < playlists.size())
         {
-            std::swap(files[index], files[index + 1]);
+            std::swap(playlists[index], playlists[index - 1]);
 
-            // Recreate playlist with new order
-            auto name = currentPlaylist->getPlaylistName();
-            playlistsManager->deletePlaylist(currentPlaylist);
-            playlistsManager->createPlaylist(name);
-            currentPlaylist = playlistsManager->getPlaylist(name);
+            // // Recreate playlist with new order
+            // auto name = currentPlaylist->getPlaylistName();
+            // playlistsManager->deletePlaylist(currentPlaylist);
+            // playlistsManager->createPlaylist(name);
+            // currentPlaylist = playlistsManager->getPlaylist(name);
 
-            for (auto &file : files)
-            {
-                currentPlaylist->addMediaFile(file);
-            }
+            // for (auto &file : files)
+            // {
+            //     currentPlaylist->addMediaFile(file);
+            // }
 
             saveAllPlaylists();
-            updatePlaylistView();
+            updatePlaylistsListView();
         }
     }
 }
 
-void PlaylistController::updatePlaylistsListView()
+void PlaylistsListController::updatePlaylistsListView()
 {
     if (playlistsListView)
     {
@@ -569,56 +324,204 @@ void PlaylistController::updatePlaylistsListView()
     }
 }
 
-void PlaylistController::updatePlaylistView()
+void PlaylistsListController::saveAllPlaylists()
 {
-    if (playlistView && currentPlaylist)
+    json indexArray;
+    for (auto playlist : playlistsManager->getAllPlaylists())
     {
-        playlistView->setCurrentPlaylist(currentPlaylist.get());
+        std::string name = playlist->getPlaylistName();
+        std::string filename = name + ".json";
+
+        indexArray.push_back({{"name", name},
+                              {"file", filename}});
+
+        std::ofstream out("data/playlists/" + filename);
+        json content;
+        playlistsManager->parsePlaylistToJson(content, playlist);
+        out << content.dump(4);
     }
+
+    std::ofstream indexOut("data/playlists/index.json");
+    indexOut << indexArray.dump(4);
 }
 
-void PlaylistController::viewPlaylistContent(const std::string &name)
-{
-    loadPlaylist(name);
-    if (viewManager && currentPlaylist)
-    {
-        // This would navigate to the playlist content view
-        // viewManager->changeState(ViewState::PLAYLIST_CONTENT);
-    }
-}
-
-void PlaylistController::saveAllPlaylists()
-{
-    playlistsManager->savePlaylistsToFile();
-}
-
-void PlaylistController::saveCurrentPlaylist()
-{
-    saveAllPlaylists(); // Since we don't have a specific method for one playlist
-}
-
-std::shared_ptr<PlaylistModel> PlaylistController::getCurrentPlaylist() const
-{
-    return currentPlaylist;
-}
-
-std::vector<std::shared_ptr<PlaylistModel>> PlaylistController::getAllPlaylists() const
+std::vector<std::shared_ptr<PlaylistModel>> PlaylistsListController::getAllPlaylists() const
 {
     return playlistsManager->getAllPlaylists();
 }
 
-void PlaylistController::scanDirectoryForMedia(const std::string &path)
+void PlaylistsListController::setOnPlaylistSelectedCallback(std::function<void(std::shared_ptr<PlaylistModel>)> callback)
 {
-    mediaLibrary->scanDirectory(path);
+    onPlaylistSelectedCallback = callback;
+}
+void PlaylistsListController::setOnPlaylistPlayCallback(std::function<void(std::shared_ptr<PlaylistModel>)> callback)
+{
+    onPlaylistPlayCallback = callback;
 }
 
+void PlaylistsListController::handlePlaylistSelected(int index)
+{
+    if (currentPlaylistIndex != index)
+    {
+        if (onPlaylistSelectedCallback)
+        {
+            onPlaylistSelectedCallback(playlistsManager->getPlaylist(index));
+        }
+    }
+}
+void PlaylistsListController::handlePlaylistPlay(int index)
+{
+    if (currentPlaylistIndex != index)
+    {
+        if (onPlaylistPlayCallback)
+        {
+            onPlaylistPlayCallback(playlistsManager->getPlaylist(index));
+        }
+    }
+}
+
+// MediaListController
+MediaListController::MediaListController(
+    MediaListInterface *mlI) : mediaListView(mlI)
+{
+    mediaLibrary = std::make_unique<MediaLibrary>();
+}
+
+void MediaListController::setMediaListView(MediaListInterface *view)
+{
+    mediaListView = view;
+}
+std::shared_ptr<PlaylistModel> MediaListController::getCurrentPlaylist() const
+{
+    return currentPlaylist;
+}
+
+void MediaListController::loadPlaylist(std::shared_ptr<PlaylistModel> playlist)
+{
+    std::lock_guard<std::mutex> lock(mediaListMutex);
+    currentPlaylist = playlist;
+    currentDirectory.clear();
+    updatePlaylistView();
+}
+
+void MediaListController::addToPlaylist(const std::string &playlistName, std::shared_ptr<MediaFileModel> file)
+{
+    std::lock_guard<std::mutex> lock(mediaListMutex);
+    auto playlist = onOtherPlaylistCallback(playlistName);
+    if (playlist.get())
+    {
+        playlist->addMediaFile(file);
+        if (currentPlaylist && currentPlaylist->getPlaylistName() == playlistName)
+        {
+            updatePlaylistView();
+        }
+    }
+}
+
+void MediaListController::addToCurrentPlaylist(std::shared_ptr<MediaFileModel> file)
+{
+    std::lock_guard<std::mutex> lock(mediaListMutex);
+    if (currentPlaylist)
+    {
+        currentPlaylist->addMediaFile(file);
+    }
+}
+
+void MediaListController::removeFromPlaylist(const std::string &playlistName, int index)
+{
+    std::lock_guard<std::mutex> lock(mediaListMutex);
+    auto playlist = onOtherPlaylistCallback(playlistName);
+    if (playlist && index >= 0 && index < playlist->size())
+    {
+        playlist->removeMediaFile(index);
+        if (currentPlaylist && currentPlaylist->getPlaylistName() == playlistName)
+        {
+            updatePlaylistView();
+        }
+    }
+}
+
+void MediaListController::removeFromCurrentPlaylist(int index)
+{
+    std::lock_guard<std::mutex> lock(mediaListMutex);
+    if (currentPlaylist && index >= 0 && index < currentPlaylist->size())
+    {
+        currentPlaylist->removeMediaFile(index);
+        updatePlaylistView();
+    }
+}
+
+void MediaListController::updatePlaylistView()
+{
+    if (mediaListView && currentPlaylist)
+    {
+        std::vector<std::string> mediaFilesNames;
+        for (auto &media : currentPlaylist->getAllMediaFiles())
+        {
+            mediaFilesNames.push_back(media->getFilename());
+        }
+        mediaListView->setCurrentPlaylist(currentPlaylist->getPlaylistName(), mediaFilesNames);
+    }
+}
+
+void MediaListController::scanDirectoryForMedia(std::filesystem::path &path)
+{
+    mediaLibrary->scanDirectory(path);
+    currentDirectory = path;
+    std::vector<std::string> mediaFilesName;
+    for (auto media : mediaLibrary->getMediaFiles())
+    {
+        mediaFilesName.push_back(media->getFilename());
+    }
+    mediaListView->setCurrentPlaylist(path.u8string(), mediaFilesName);
+}
+
+void MediaListController::setOnMediaSelectedCallback(std::function<void(std::shared_ptr<MediaFileModel>)> callback)
+{
+    onMediaSelectedCallback = callback;
+}
+
+void MediaListController::setOnMediaPlayCallback(std::function<void(const std::vector<std::shared_ptr<MediaFileModel>> &, int)> callback)
+{
+    onMediaPlayCallback = callback;
+}
+
+void MediaListController::setOnOtherPlaylistCallback(std::function<std::shared_ptr<class PlaylistModel>(const std::string &)> callback)
+{
+    onOtherPlaylistCallback = callback;
+}
+
+void MediaListController::handleMediaSelected(int index)
+{
+    if (currentMediaIndex != index)
+    {
+        if (onMediaSelectedCallback)
+        {
+            if (currentDirectory.empty())
+                onMediaSelectedCallback(currentPlaylist->getMediaFile(index));
+            onMediaSelectedCallback(mediaLibrary->getMediaFile(index));
+        }
+    }
+}
+
+void MediaListController::handleMediaPlay(int index)
+{
+    if (currentMediaIndex != index)
+    {
+        if (onMediaPlayCallback)
+        {
+            if (currentDirectory.empty())
+                onMediaPlayCallback(currentPlaylist->getAllMediaFiles(), index);
+            onMediaPlayCallback(mediaLibrary->getMediaFiles(), index);
+        }
+    }
+}
 // Static member for callback
 PlayerController *PlayerController::instance = nullptr;
 
 // PlayerController implementation
-PlayerController::PlayerController(ViewManagerInterface *vm)
-    : Controller(vm),
-      currentMusic(nullptr),
+PlayerController::PlayerController(PlayerInterface *pm)
+    : currentMusic(nullptr),
       isPlaying(false),
       isPaused(false),
       volume(SDL_MIX_MAXVOLUME / 2), // 50% volume
@@ -626,10 +529,12 @@ PlayerController::PlayerController(ViewManagerInterface *vm)
       totalDuration(0),
       currentPlaylistIndex(-1),
       threadRunning(false),
-      playerView(nullptr)
+      playerView(pm)
 {
     // Set static instance for callback
     instance = this;
+    boardDriver = new S32K144PortDriver();
+    serialReader = nullptr;
 }
 
 PlayerController::~PlayerController()
@@ -651,13 +556,70 @@ bool PlayerController::initialize()
     // Set up music finished callback
     Mix_HookMusicFinished(musicFinishedCallback);
 
+    boardDriver->start(
+        [this](const std::string &portName, bool isConnected)
+        {
+            if (isConnected)
+            {
+                serialReader = new SerialPortReader(portName, 9600);
+                serialReader->start(
+                    [this](const std::vector<uint8_t> &buffer, size_t bytesRead)
+                    {
+                        for (size_t i = 0; i < bytesRead; ++i)
+                        {
+                            std::cout << (unsigned)buffer[i] << " ";
+                            switch (buffer[i])
+                            {
+                            case 200:
+                                if (this->isPaused)
+                                    play();
+                                else
+                                    pause();
+                                break;
+
+                            case 201:
+                                stop();
+                                break;
+                            case 202:
+                                next();
+                                break;
+                            case 203:
+                                previous();
+                                break;
+                            default:
+                                setVolume(buffer[i]);
+                                break;
+                            }
+                        }
+                        std::cout << "read: " << bytesRead << '\n';
+                    });
+            }
+            else
+            {
+                if (serialReader)
+                {
+                    serialReader->stop();
+                    delete serialReader;
+                    serialReader = nullptr;
+                }
+            }
+        });
+
     return true;
 }
 
 void PlayerController::shutdown()
 {
     // Stop playback and close audio
-    stop();
+    Mix_HookMusicFinished(nullptr);
+    Mix_HaltMusic();
+
+    // Free music resources
+    if (currentMusic)
+    {
+        Mix_FreeMusic(currentMusic);
+        currentMusic = nullptr;
+    }
 
     // Stop thread
     if (threadRunning)
@@ -697,11 +659,11 @@ void PlayerController::play()
             playCurrentMedia();
         }
     }
-    else if (currentPlaylist && currentPlaylist->size() > 0)
+    else if (currentPlaylist.size() > 0)
     {
         // Play first track of playlist if no current media
         currentPlaylistIndex = 0;
-        auto media = currentPlaylist->getMediaFile(0);
+        auto media = currentPlaylist[0];
         if (media)
         {
             currentMedia = media;
@@ -709,7 +671,7 @@ void PlayerController::play()
         }
     }
 
-    updatePlayerView();
+    playerView->updatePlaybackStatus(true);
 }
 
 void PlayerController::playMedia(std::shared_ptr<MediaFileModel> media)
@@ -726,16 +688,15 @@ void PlayerController::playMedia(std::shared_ptr<MediaFileModel> media)
     }
 
     currentMedia = media;
-    currentPlaylist = nullptr; // Clear playlist context
+    currentPlaylist.clear(); // Clear playlist context
     currentPlaylistIndex = -1;
 
     playCurrentMedia();
-    updatePlayerView();
 }
 
-void PlayerController::playPlaylist(std::shared_ptr<PlaylistModel> playlist, int startIndex)
+void PlayerController::playPlaylist(const std::vector<std::shared_ptr<MediaFileModel>> &playlist, int startIndex)
 {
-    if (!playlist || playlist->size() == 0)
+    if (playlist.empty())
         return;
 
     std::lock_guard<std::mutex> lock(playbackMutex);
@@ -747,15 +708,13 @@ void PlayerController::playPlaylist(std::shared_ptr<PlaylistModel> playlist, int
     }
 
     currentPlaylist = playlist;
-    currentPlaylistIndex = (startIndex >= 0 && startIndex < playlist->size()) ? startIndex : 0;
+    currentPlaylistIndex = (startIndex >= 0 && startIndex < playlist.size()) ? startIndex : 0;
 
-    currentMedia = playlist->getMediaFile(currentPlaylistIndex);
+    currentMedia = playlist[currentPlaylistIndex];
     if (currentMedia)
     {
         playCurrentMedia();
     }
-
-    updatePlayerView();
 }
 
 void PlayerController::pause()
@@ -766,14 +725,13 @@ void PlayerController::pause()
     {
         Mix_PauseMusic();
         isPaused = true;
-        updatePlayerView();
     }
     else if (isPlaying && isPaused)
     {
         Mix_ResumeMusic();
         isPaused = false;
-        updatePlayerView();
     }
+    playerView->updatePlaybackStatus(false);
 }
 
 void PlayerController::stop()
@@ -782,10 +740,11 @@ void PlayerController::stop()
 
     if (isPlaying)
     {
-        Mix_HaltMusic();
         isPlaying = false;
         isPaused = false;
         currentPosition = 0;
+        currentMedia = nullptr;
+        Mix_HaltMusic();
 
         // Free music resources
         if (currentMusic)
@@ -793,8 +752,12 @@ void PlayerController::stop()
             Mix_FreeMusic(currentMusic);
             currentMusic = nullptr;
         }
-
-        updatePlayerView();
+        if (playerView)
+        {
+            playerView->setCurrentMedia("", "");
+            playerView->updateProgress(0, 0);
+            playerView->updatePlaybackStatus(false);
+        }
     }
 }
 
@@ -802,14 +765,14 @@ void PlayerController::next()
 {
     std::lock_guard<std::mutex> lock(playbackMutex);
 
-    if (currentPlaylist && currentPlaylistIndex >= 0)
+    if (!currentPlaylist.empty() && currentPlaylistIndex >= 0)
     {
         // Move to next track in playlist
         int nextIndex = currentPlaylistIndex + 1;
-        if (nextIndex < currentPlaylist->size())
+        if (nextIndex < currentPlaylist.size())
         {
             currentPlaylistIndex = nextIndex;
-            currentMedia = currentPlaylist->getMediaFile(currentPlaylistIndex);
+            currentMedia = currentPlaylist[currentPlaylistIndex];
 
             // Start playing the new track
             if (currentMedia)
@@ -818,19 +781,17 @@ void PlayerController::next()
             }
         }
     }
-
-    updatePlayerView();
 }
 
 void PlayerController::previous()
 {
     std::lock_guard<std::mutex> lock(playbackMutex);
 
-    if (currentPlaylist && currentPlaylistIndex > 0)
+    if (!currentPlaylist.empty() && currentPlaylistIndex > 0)
     {
         // Move to previous track in playlist
         currentPlaylistIndex--;
-        currentMedia = currentPlaylist->getMediaFile(currentPlaylistIndex);
+        currentMedia = currentPlaylist[currentPlaylistIndex];
 
         // Start playing the new track
         if (currentMedia)
@@ -838,15 +799,13 @@ void PlayerController::previous()
             playCurrentMedia();
         }
     }
-
-    updatePlayerView();
 }
 
 void PlayerController::setVolume(int vol)
 {
     volume = std::clamp(vol, 0, SDL_MIX_MAXVOLUME);
     Mix_VolumeMusic(volume);
-    updatePlayerView();
+    playerView->updateVolume(volume);
 }
 
 int PlayerController::getVolume() const
@@ -880,8 +839,8 @@ void PlayerController::seek(int position)
         // Try to seek (may not work with all formats)
         if (Mix_SetMusicPosition(static_cast<double>(position)) == 0)
         {
-            currentPosition = position;
-            updatePlayerView();
+            currentPosition = position * 2;
+            playerView->updateProgress(position, totalDuration);
         }
     }
 }
@@ -908,26 +867,12 @@ bool PlayerController::isMediaPaused() const
 
 int PlayerController::getCurrentPosition() const
 {
-    return currentPosition;
+    return currentPosition / 2;
 }
 
 int PlayerController::getDuration() const
 {
     return totalDuration;
-}
-
-std::shared_ptr<MediaFileModel> PlayerController::getCurrentMedia() const
-{
-    return currentMedia;
-}
-
-void PlayerController::updatePlayerView()
-{
-    if (playerView && currentMedia)
-    {
-        playerView->setCurrentMedia(currentMedia.get());
-        // Additional view updates would happen here
-    }
 }
 
 bool PlayerController::loadMedia(std::shared_ptr<MediaFileModel> media)
@@ -970,7 +915,19 @@ void PlayerController::playCurrentMedia()
             if (!threadRunning)
             {
                 threadRunning = true;
+                currentPosition = 0;
                 playbackThread = std::thread(&PlayerController::playbackMonitorThread, this);
+            }
+
+            if (playerView)
+            {
+                if ((currentMedia->getMetadata("Title").empty()) || (currentMedia->getMetadata("Artist").empty()))
+                    playerView->setCurrentMedia(currentMedia->getFilename(), "");
+
+                else
+                    playerView->setCurrentMedia(currentMedia->getMetadata("Title"), currentMedia->getMetadata("Artist"));
+
+                playerView->updatePlaybackStatus(true);
             }
         }
         else
@@ -986,14 +943,14 @@ void PlayerController::handlePlaybackFinished()
     // This is called when a track finishes playing
 
     // Try to play the next track if in a playlist
-    if (currentPlaylist && currentPlaylistIndex >= 0)
+    if (!currentPlaylist.empty() && currentPlaylistIndex >= 0)
     {
         int nextIndex = currentPlaylistIndex + 1;
-        if (nextIndex < currentPlaylist->size())
+        if (nextIndex < currentPlaylist.size())
         {
             // Move to next track
             currentPlaylistIndex = nextIndex;
-            currentMedia = currentPlaylist->getMediaFile(currentPlaylistIndex);
+            currentMedia = currentPlaylist[currentPlaylistIndex];
 
             // Start playing the new track
             if (currentMedia)
@@ -1014,8 +971,6 @@ void PlayerController::handlePlaybackFinished()
         isPlaying = false;
         currentPosition = 0;
     }
-
-    updatePlayerView();
 }
 
 void PlayerController::playbackMonitorThread()
@@ -1038,7 +993,7 @@ void PlayerController::playbackMonitorThread()
                     // Update view every second
                     if (currentPosition % 2 == 0)
                     {
-                        updatePlayerView();
+                        playerView->updateProgress(currentPosition / 2, totalDuration);
                     }
                 }
                 else
@@ -1057,156 +1012,17 @@ void PlayerController::playbackMonitorThread()
 void PlayerController::musicFinishedCallback()
 {
     // This is called by SDL_mixer when music finishes
-    if (instance)
+    if (instance->isMediaPlaying() && instance)
     {
         instance->handlePlaybackFinished();
     }
 }
 
-// USBController implementation
-USBController::USBController(
-    ViewManagerInterface *vm,
-    std::shared_ptr<USBManager> usb,
-    std::shared_ptr<MediaLibrary> library) : Controller(vm),
-                                             usbManager(usb),
-                                             mediaLibrary(library),
-                                             threadRunning(false),
-                                             usbView(nullptr)
-{
-}
-
-USBController::~USBController()
-{
-    shutdown();
-}
-
-void USBController::initialize()
-{
-    // Start USB detection thread
-    threadRunning = true;
-    detectionThread = std::thread(&USBController::usbDetectionThread, this);
-
-    // Initial detection
-    detectUSBDevices();
-}
-
-void USBController::shutdown()
-{
-    // Stop thread
-    if (threadRunning)
-    {
-        threadRunning = false;
-        if (detectionThread.joinable())
-        {
-            detectionThread.join();
-        }
-    }
-
-    // Unmount any mounted device
-    if (!currentMountPoint.empty())
-    {
-        usbManager->unmountDevice(currentMountPoint);
-        currentMountPoint.clear();
-    }
-}
-
-void USBController::setUSBView(USBInterface *view)
-{
-    usbView = view;
-}
-
-void USBController::detectUSBDevices()
-{
-    std::lock_guard<std::mutex> lock(usbMutex);
-    detectedDevices = usbManager->detectUSBDevices();
-    updateUSBView();
-}
-
-bool USBController::mountUSB(const std::string &device)
-{
-    std::lock_guard<std::mutex> lock(usbMutex);
-
-    // Unmount current device if any
-    if (!currentMountPoint.empty())
-    {
-        usbManager->unmountDevice(currentMountPoint);
-        currentMountPoint.clear();
-    }
-
-    // Mount the selected device
-    bool result = usbManager->mountDevice(device);
-    if (result)
-    {
-        currentMountPoint = usbManager->getMountPoint(device);
-        // Scan for media files
-        scanUSBContents(currentMountPoint);
-    }
-
-    updateUSBView();
-    return result;
-}
-
-bool USBController::unmountUSB(const std::string &device)
-{
-    std::lock_guard<std::mutex> lock(usbMutex);
-
-    bool result = usbManager->unmountDevice(device);
-    if (result && device == currentMountPoint)
-    {
-        currentMountPoint.clear();
-    }
-
-    updateUSBView();
-    return result;
-}
-
-void USBController::scanUSBContents(const std::string &mountPoint)
-{
-    if (!mountPoint.empty())
-    {
-        mediaLibrary->scanUSBDevice(mountPoint);
-    }
-}
-
-void USBController::updateUSBView()
-{
-    if (usbView)
-    {
-        usbView->updateDeviceList(usbManager->detectUSBDevices());
-    }
-}
-
-void USBController::usbDetectionThread()
-{
-    using namespace std::chrono;
-
-    while (threadRunning)
-    {
-        // Check for USB changes every 2 seconds
-        {
-            std::unique_lock<std::mutex> lock(usbMutex);
-            auto currentDevices = usbManager->detectUSBDevices();
-
-            // Check if device list changed
-            if (currentDevices != detectedDevices)
-            {
-                detectedDevices = currentDevices;
-                updateUSBView();
-            }
-        }
-
-        // Sleep for 2 seconds
-        std::this_thread::sleep_for(seconds(2));
-    }
-}
-
 // MetadataController implementation
 MetadataController::MetadataController(
-    ViewManagerInterface *vm,
-    std::shared_ptr<MetadataManager> metadata) : Controller(vm),
-                                                 metadataManager(metadata),
-                                                 metadataView(nullptr)
+    MetadataInterface *mV) : metadataView(mV)
 {
+    metadataManager = std::make_shared<MetadataManager>();
 }
 
 void MetadataController::setMetadataView(MetadataInterface *view)
@@ -1214,23 +1030,25 @@ void MetadataController::setMetadataView(MetadataInterface *view)
     metadataView = view;
 }
 
+void MetadataController::preloadMetadata(std::vector<std::shared_ptr<MediaFileModel>> mediaFiles)
+{
+    std::lock_guard<std::mutex> lock(metadataMutex);
+
+    for (auto &file : mediaFiles)
+    {
+        metadataManager->loadMetadata(file);
+    }
+}
+
 void MetadataController::loadMetadata(std::shared_ptr<MediaFileModel> file)
 {
     std::lock_guard<std::mutex> lock(metadataMutex);
 
+    metadataManager->loadMetadata(file);
     currentMedia = file;
-
-    if (currentMedia)
-    {
-        // Load metadata
-        originalMetadata = currentMedia->getAllMetadata();
-        editedMetadata = originalMetadata; // Make a copy for editing
-    }
-    else
-    {
-        originalMetadata.clear();
-        editedMetadata.clear();
-    }
+    // Load metadata
+    originalMetadata = currentMedia->getAllMetadata();
+    editedMetadata = originalMetadata; // Make a copy for editing
 
     updateMetadataView();
 }
@@ -1249,7 +1067,7 @@ bool MetadataController::saveMetadata()
     }
 
     // Save changes to file
-    bool success = currentMedia->saveMetadata();
+    bool success = metadataManager->saveMetadata(currentMedia);
 
     if (success)
     {
@@ -1301,9 +1119,9 @@ void MetadataController::removeField(const std::string &key)
 
 void MetadataController::updateMetadataView()
 {
-    if (metadataView && currentMedia)
+    if (metadataView && currentMedia.get())
     {
-        metadataView->showMetadata(currentMedia.get());
+        metadataView->showMetadata(currentMedia->getAllMetadata());
     }
 }
 
@@ -1323,11 +1141,6 @@ void MetadataController::exitEditMode()
     {
         // metadataView->exitEditMode();
     }
-}
-
-std::shared_ptr<MediaFileModel> MetadataController::getCurrentMedia() const
-{
-    return currentMedia;
 }
 
 const std::map<std::string, std::string> &MetadataController::getMetadata() const

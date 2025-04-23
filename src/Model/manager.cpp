@@ -6,42 +6,104 @@
 #include <iostream>
 #include <sys/stat.h>
 
+#include <taglib/fileref.h>
+#include <taglib/tag.h>
+#include <taglib/mpegfile.h>
+#include <taglib/mp4file.h>
+#include <taglib/flacfile.h>
+#include <taglib/vorbisfile.h>
+#include <taglib/wavfile.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <codecvt>
+
+std::string wstring_to_utf8(const std::wstring &wstr)
+{
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv;
+    return conv.to_bytes(wstr);
+}
+std::wstring utf8_to_wstring(const std::string &str)
+{
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv;
+    return conv.from_bytes(str);
+}
+#endif
+
+using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // MetadataManager implementations
-std::shared_ptr<MediaFileModel> MetadataManager::loadMetadata(const std::string &filepath)
+bool MetadataManager::loadMetadata(std::shared_ptr<MediaFileModel> mediaFile)
 {
-    std::shared_ptr<MediaFileModel> file;
-    std::string ext = filepath.substr(filepath.find_last_of(".") + 1);
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+#ifdef _WIN32
+    TagLib::FileRef f(utf8_to_wstring(mediaFile->getFilepath()).c_str());
+#else
+    TagLib::FileRef f(mediaFile->getFilepath().c_str());
+#endif
 
-    if (ext == "mp3" || ext == "wav" || ext == "ogg" || ext == "flac")
+    if (f.isNull())
+        return false;
+
+    if (f.tag())
     {
-        file = std::make_shared<AudioFileModel>(filepath);
-    }
-    else if (ext == "mp4" || ext == "avi" || ext == "mkv" || ext == "mov")
-    {
-        file = std::make_shared<VideoFileModel>(filepath);
-    }
-    else
-    {
-        file = std::make_shared<MediaFileModel>(filepath);
+        TagLib::Tag *tag = f.tag();
+
+        mediaFile->setMetadata("Title", tag->title().to8Bit(true));
+        mediaFile->setMetadata("Artist", tag->artist().to8Bit(true));
+        mediaFile->setMetadata("Album", tag->album().to8Bit(true));
+        mediaFile->setMetadata("Comment", tag->comment().to8Bit(true));
+        mediaFile->setMetadata("Genre", tag->genre().to8Bit(true));
+        mediaFile->setMetadata("Year", std::to_string(tag->year()));
+        mediaFile->setMetadata("Track", std::to_string(tag->track()));
     }
 
-    return file;
+    if (f.audioProperties())
+    {
+        TagLib::AudioProperties *props = f.audioProperties();
+        mediaFile->setDuration(props->lengthInSeconds());
+        mediaFile->setMetadata("Bitrate", std::to_string(props->bitrate()) + " kbps");
+        mediaFile->setMetadata("Channels", std::to_string(props->channels()));
+        mediaFile->setMetadata("Sample Rate", std::to_string(props->sampleRate()) + " Hz");
+    }
+
+    return true;
 }
 
-bool MetadataManager::saveMetadata(std::shared_ptr<MediaFileModel> file)
+bool MetadataManager::saveMetadata(std::shared_ptr<MediaFileModel> mediaFile)
 {
-    return file->saveMetadata();
+#ifdef _WIN32
+    TagLib::FileRef f(utf8_to_wstring(mediaFile->getFilepath()).c_str());
+#else
+    TagLib::FileRef f(mediaFile->getFilepath().c_str());
+#endif
+
+    if (f.isNull())
+        return false;
+
+    TagLib::Tag *tag = f.tag();
+    if (!tag)
+        return false;
+
+    if (!mediaFile->getMetadata("Title").empty())
+        tag->setTitle(TagLib::String(mediaFile->getMetadata("Title"), TagLib::String::UTF8));
+    if (!mediaFile->getMetadata("Artist").empty())
+        tag->setArtist(TagLib::String(mediaFile->getMetadata("Artist"), TagLib::String::UTF8));
+    if (!mediaFile->getMetadata("Album").empty())
+        tag->setAlbum(TagLib::String(mediaFile->getMetadata("Album"), TagLib::String::UTF8));
+    if (!mediaFile->getMetadata("Comment").empty())
+        tag->setComment(TagLib::String(mediaFile->getMetadata("Comment"), TagLib::String::UTF8));
+    if (!mediaFile->getMetadata("Genre").empty())
+        tag->setGenre(TagLib::String(mediaFile->getMetadata("Genre"), TagLib::String::UTF8));
+    if (!mediaFile->getMetadata("Year").empty())
+        tag->setYear(std::stoi(mediaFile->getMetadata("Year")));
+    if (!mediaFile->getMetadata("Track").empty())
+        tag->setTrack(std::stoi(mediaFile->getMetadata("Track")));
+
+    return f.save();
 }
 
-void MetadataManager::extractMetadata(std::shared_ptr<MediaFileModel> file)
-{
-    file->loadMetadata();
-}
-
-void PlaylistsManager::createPlaylist(const std::string &name)
+bool PlaylistsManager::createPlaylist(const std::string &name)
 {
     std::lock_guard<std::mutex> lock(playlistsMutex);
 
@@ -55,11 +117,12 @@ void PlaylistsManager::createPlaylist(const std::string &name)
     if (it == playlists.end())
     {
         playlists.push_back(std::make_shared<PlaylistModel>(name));
-        savePlaylistsToFile();
+        return true;
     }
+    return false;
 }
 
-void PlaylistsManager::deletePlaylist(std::shared_ptr<PlaylistModel> playlist)
+bool PlaylistsManager::deletePlaylist(std::shared_ptr<PlaylistModel> playlist)
 {
     std::lock_guard<std::mutex> lock(playlistsMutex);
 
@@ -68,8 +131,9 @@ void PlaylistsManager::deletePlaylist(std::shared_ptr<PlaylistModel> playlist)
     if (it != playlists.end())
     {
         playlists.erase(it);
-        savePlaylistsToFile();
+        return true;
     }
+    return false;
 }
 
 std::shared_ptr<PlaylistModel> PlaylistsManager::getPlaylist(const std::string &name)
@@ -87,236 +151,136 @@ std::shared_ptr<PlaylistModel> PlaylistsManager::getPlaylist(const std::string &
     return nullptr;
 }
 
+std::shared_ptr<PlaylistModel> PlaylistsManager::getPlaylist(int index)
+{
+    std::lock_guard<std::mutex> lock(playlistsMutex);
+
+    if (index < playlists.size() && index >= 0)
+        return playlists[index];
+
+    return nullptr;
+}
+
 std::vector<std::shared_ptr<PlaylistModel>> PlaylistsManager::getAllPlaylists() const
 {
     std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(playlistsMutex));
     return playlists;
 }
 
-void PlaylistsManager::savePlaylistsToFile()
+void PlaylistsManager::parsePlaylistToJson(json &js, std::shared_ptr<PlaylistModel> playlist)
 {
-    std::ofstream file(PLAYLISTS_FILE, std::ios::binary);
+    js["playlist_name"] = playlist->getPlaylistName();
 
-    if (!file)
+    nlohmann::json mediaArray = nlohmann::json::array();
+    for (const auto &media : playlist->getAllMediaFiles())
     {
-        std::cerr << "Error opening playlists file for writing" << std::endl;
-        return;
-    }
+        nlohmann::json mediaJson;
+        mediaJson["filepath"] = media->getFilepath();
 
-    // Write number of playlists
-    size_t numPlaylists = playlists.size();
-    file.write(reinterpret_cast<const char *>(&numPlaylists), sizeof(numPlaylists));
-
-    // Write each playlist
-    for (const auto &playlist : playlists)
-    {
-        // Write playlist name
-        std::string name = playlist->getPlaylistName();
-        size_t nameLength = name.length();
-        file.write(reinterpret_cast<const char *>(&nameLength), sizeof(nameLength));
-        file.write(name.c_str(), nameLength);
-
-        // Write number of files
-        auto files = playlist->getAllMediaFiles();
-        size_t numFiles = files.size();
-        file.write(reinterpret_cast<const char *>(&numFiles), sizeof(numFiles));
-
-        // Write each file path
-        for (const auto &mfile : files)
+        // Handle metadata as additional keys
+        nlohmann::json additionalKeys = nlohmann::json::array();
+        for (const auto &[key, value] : media->getAllAddMetadata())
         {
-            std::string path = mfile->getFilepath();
-            size_t pathLength = path.length();
-            file.write(reinterpret_cast<const char *>(&pathLength), sizeof(pathLength));
-            file.write(path.c_str(), pathLength);
+            nlohmann::json metadataItem;
+            metadataItem[key] = value;
+            additionalKeys.push_back(metadataItem);
         }
+        mediaJson["additional key"] = additionalKeys;
+
+        mediaArray.push_back(mediaJson);
     }
+
+    js["media"] = mediaArray;
 }
 
 // PlaylistsManager implementations
-void PlaylistsManager::loadPlaylistsFromFile(MediaLibrary &library)
+void PlaylistsManager::loadPlaylistFromJson(json &js)
 {
-    std::ifstream file(PLAYLISTS_FILE, std::ios::binary);
-
-    if (!file)
-    {
-        std::cerr << "Playlists file not found, creating new file" << std::endl;
-        return;
-    }
-
     std::lock_guard<std::mutex> lock(playlistsMutex);
-    playlists.clear();
-
-    // Read number of playlists
-    size_t numPlaylists;
-    file.read(reinterpret_cast<char *>(&numPlaylists), sizeof(numPlaylists));
-
-    // Read each playlist
-    for (size_t i = 0; i < numPlaylists; ++i)
+    auto playlist = std::make_shared<PlaylistModel>();
+    // Set playlist name
+    if (js.contains("playlist_name"))
     {
-        // Read playlist name
-        size_t nameLength;
-        file.read(reinterpret_cast<char *>(&nameLength), sizeof(nameLength));
-
-        std::string name(nameLength, ' ');
-        file.read(&name[0], nameLength);
-
-        auto playlist = std::make_shared<PlaylistModel>(name);
-
-        // Read number of files
-        size_t numFiles;
-        file.read(reinterpret_cast<char *>(&numFiles), sizeof(numFiles));
-
-        // Read each file path
-        for (size_t j = 0; j < numFiles; ++j)
-        {
-            size_t pathLength;
-            file.read(reinterpret_cast<char *>(&pathLength), sizeof(pathLength));
-
-            std::string path(pathLength, ' ');
-            file.read(&path[0], pathLength);
-
-            // Try to find the file in the library
-            auto mediaFile = library.getMediaByFilename(fs::path(path).filename().string());
-
-            // If not found, create a new one
-            if (!mediaFile)
-            {
-                // Check if file exists
-                if (fs::exists(path))
-                {
-                    mediaFile = std::make_shared<MediaFileModel>(path);
-                }
-                else
-                {
-                    // Skip missing files
-                    continue;
-                }
-            }
-
-            playlist->addMediaFile(mediaFile);
-        }
-
-        playlists.push_back(playlist);
+        playlist->setPlaylistName(js["playlist_name"].get<std::string>());
     }
-}
 
-// USBManager implementation
-bool USBManager::isMountPoint(const std::string &path)
-{
-    struct stat buf;
-    if (stat(path.c_str(), &buf) != 0)
+    // Process media files
+    if (js.contains("media") && js["media"].is_array())
     {
-        return false;
-    }
-    return S_ISDIR(buf.st_mode);
-}
-
-std::vector<std::string> USBManager::detectUSBDevices()
-{
-    std::vector<std::string> devices;
-
-    // In a real implementation, this would use Linux-specific APIs to detect USB devices
-    // For simplicity, we'll check common USB mount points
-    const std::vector<std::string> commonMountPoints = {
-        "/media", "/mnt", "/run/media"};
-
-    for (const auto &basePoint : commonMountPoints)
-    {
-        if (!fs::exists(basePoint))
-            continue;
-
-        try
+        for (const auto &mediaJson : js["media"])
         {
-            for (const auto &entry : fs::directory_iterator(basePoint))
+
+            // Set filepath
+            if (mediaJson.contains("filepath"))
             {
-                if (fs::is_directory(entry))
+                std::shared_ptr<MediaFileModel> media =
+                    std::make_shared<MediaFileModel>(mediaJson["filepath"].get<std::string>());
+                // Process additional keys (metadata)
+                if (mediaJson.contains("additional key") && mediaJson["additional key"].is_array())
                 {
-                    devices.push_back(entry.path().string());
+                    for (const auto &additionalItem : mediaJson["additional key"])
+                    {
+                        for (auto it = additionalItem.begin(); it != additionalItem.end(); ++it)
+                        {
+                            media->setMetadata(it.key(), it.value().get<std::string>());
+                        }
+                    }
                 }
+
+                playlist->addMediaFile(media);
             }
         }
-        catch (const fs::filesystem_error &e)
-        {
-            std::cerr << "Error scanning mount points: " << e.what() << std::endl;
-        }
     }
-
-    return devices;
-}
-
-bool USBManager::mountDevice(const std::string &device)
-{
-    // In a real implementation, this would use Linux-specific APIs to mount devices
-    // For simplicity we'll assume the device is already mounted
-    if (std::find(mountedDevices.begin(), mountedDevices.end(), device) == mountedDevices.end())
-    {
-        mountedDevices.push_back(device);
-        return true;
-    }
-    return false;
-}
-
-bool USBManager::unmountDevice(const std::string &device)
-{
-    // In a real implementation, this would use Linux-specific APIs to unmount devices
-    auto it = std::find(mountedDevices.begin(), mountedDevices.end(), device);
-    if (it != mountedDevices.end())
-    {
-        // Execute umount command
-        std::string command = "umount " + device + " 2>/dev/null";
-        int result = system(command.c_str());
-
-        if (result == 0)
-        {
-            mountedDevices.erase(it);
-            return true;
-        }
-    }
-    return false;
-}
-
-std::string USBManager::getMountPoint(const std::string &device)
-{
-    // In a real implementation, this would query the system for the mount point
-    return device;
 }
 
 // MediaLibrary implementation
 
-bool MediaLibrary::isAudioFile(const std::string &path)
+bool MediaLibrary::isAudioFile(std::filesystem::path &path)
 {
-    std::string ext = path.substr(path.find_last_of(".") + 1);
+    std::string u8path = path.u8string();
+    std::string ext = u8path.substr(u8path.find_last_of(".") + 1);
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     return std::find(supportedAudioExtensions.begin(), supportedAudioExtensions.end(), ext) != supportedAudioExtensions.end();
 }
 
-bool MediaLibrary::isVideoFile(const std::string &path)
+bool MediaLibrary::isVideoFile(std::filesystem::path &path)
 {
-    std::string ext = path.substr(path.find_last_of(".") + 1);
+    std::string u8path = path.u8string();
+    std::string ext = u8path.substr(u8path.find_last_of(".") + 1);
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     return std::find(supportedVideoExtensions.begin(), supportedVideoExtensions.end(), ext) != supportedVideoExtensions.end();
 }
 
-void MediaLibrary::scanDirectory(const std::string &path)
+void MediaLibrary::scanDirectory(fs::path &path)
 {
     std::lock_guard<std::mutex> lock(libraryMutex);
-
+    mediaFiles.clear();
     try
     {
         for (const auto &entry : fs::recursive_directory_iterator(path))
         {
             if (entry.is_regular_file())
             {
-                std::string filepath = entry.path().string();
-
+                fs::path filepath = entry.path();
+#ifdef _WIN32
                 if (isAudioFile(filepath))
                 {
-                    mediaFiles.push_back(std::make_shared<AudioFileModel>(filepath));
+                    mediaFiles.push_back(std::make_shared<AudioFileModel>(wstring_to_utf8(filepath.wstring())));
                 }
                 else if (isVideoFile(filepath))
                 {
-                    mediaFiles.push_back(std::make_shared<VideoFileModel>(filepath));
+                    mediaFiles.push_back(std::make_shared<VideoFileModel>(wstring_to_utf8(filepath.wstring())));
                 }
+#else
+                if (isAudioFile(filepath))
+                {
+                    mediaFiles.push_back(std::make_shared<AudioFileModel>(filepath.string()));
+                }
+                else if (isVideoFile(filepath))
+                {
+                    mediaFiles.push_back(std::make_shared<VideoFileModel>(filepath.string()));
+                }
+#endif
             }
         }
     }
@@ -326,34 +290,18 @@ void MediaLibrary::scanDirectory(const std::string &path)
     }
 }
 
-void MediaLibrary::scanUSBDevice(const std::string &mountPoint)
+void MediaLibrary::scanUSBDevice(fs::path &mountPoint)
 {
     scanDirectory(mountPoint);
 }
 
+std::shared_ptr<MediaFileModel> MediaLibrary::getMediaFile(int index) const
+{
+    return mediaFiles[index];
+}
 std::vector<std::shared_ptr<MediaFileModel>> MediaLibrary::getMediaFiles() const
 {
     return mediaFiles;
-}
-
-std::vector<std::shared_ptr<MediaFileModel>> MediaLibrary::getPagedMediaFiles(size_t page, size_t itemsPerPage) const
-{
-    std::vector<std::shared_ptr<MediaFileModel>> result;
-
-    size_t startIdx = page * itemsPerPage;
-    size_t endIdx = std::min(startIdx + itemsPerPage, mediaFiles.size());
-
-    if (startIdx < mediaFiles.size())
-    {
-        result.assign(mediaFiles.begin() + startIdx, mediaFiles.begin() + endIdx);
-    }
-
-    return result;
-}
-
-size_t MediaLibrary::getTotalPages(size_t itemsPerPage) const
-{
-    return (mediaFiles.size() + itemsPerPage - 1) / itemsPerPage;
 }
 
 std::vector<std::shared_ptr<MediaFileModel>> MediaLibrary::searchMedia(const std::string &keyword) const

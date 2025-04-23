@@ -27,6 +27,7 @@ public:
 
     void removeMediaFile(size_t index);
     void removeMediaFile(const std::string &filepath);
+    void clear();
 
     void setPlaylistName(const std::string &name);
     const std::string &getPlaylistName() const;

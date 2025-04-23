@@ -1,1132 +1,41 @@
 #include "view.h"
+#include <iostream>
 
-// UIComponent definitions
-UIComponent::UIComponent(int x, int y, int w, int h) : visible(true), enabled(true)
-{
-    bounds = {x, y, w, h};
-}
+#ifdef _WIN32
+#include <windows.h>
+#include <shobjidl.h> // For IFileDialog
+#include <optional>
+#endif
 
-void UIComponent::setVisible(bool isVisible)
-{
-    visible = isVisible;
-}
+#define CORNER_DETECTION_AREA 15
 
-bool UIComponent::isVisible() const
-{
-    return visible;
-}
-
-void UIComponent::setEnabled(bool isEnabled)
-{
-    enabled = isEnabled;
-}
-
-bool UIComponent::isEnabled() const
-{
-    return enabled;
-}
-
-void UIComponent::setBounds(int x, int y, int w, int h)
-{
-    bounds = {x, y, w, h};
-}
-
-SDL_Rect UIComponent::getBounds() const
-{
-    return bounds;
-}
-
-bool UIComponent::containsPoint(int x, int y) const
-{
-    return (x >= bounds.x && x < bounds.x + bounds.w &&
-            y >= bounds.y && y < bounds.y + bounds.h);
-}
-
-// Button definitions
-Button::Button(int x, int y, int w, int h, const std::string &buttonText)
-    : UIComponent(x, y, w, h), text(buttonText), isHovered(false)
-{
-    textColor = {255, 255, 255, 255};
-    backgroundColor = {100, 100, 100, 255};
-    hoverColor = {150, 150, 150, 255};
-}
-
-void Button::render(SDL_Renderer *renderer)
-{
-    if (!visible)
-        return;
-
-    // Draw background
-    SDL_SetRenderDrawColor(renderer,
-                           isHovered ? hoverColor.r : backgroundColor.r,
-                           isHovered ? hoverColor.g : backgroundColor.g,
-                           isHovered ? hoverColor.b : backgroundColor.b,
-                           isHovered ? hoverColor.a : backgroundColor.a);
-    SDL_RenderFillRect(renderer, &bounds);
-
-    // Draw border
-    SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
-    SDL_RenderDrawRect(renderer, &bounds);
-
-    // Draw text
-    if (!text.empty())
-    {
-        TTF_Font *font = TTF_OpenFont("fonts/default.ttf", 16);
-        if (font)
-        {
-            SDL_Surface *textSurface = TTF_RenderText_Solid(font, text.c_str(), textColor);
-            if (textSurface)
-            {
-                SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-                if (textTexture)
-                {
-                    SDL_Rect textRect = {
-                        bounds.x + (bounds.w - textSurface->w) / 2,
-                        bounds.y + (bounds.h - textSurface->h) / 2,
-                        textSurface->w,
-                        textSurface->h};
-                    SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
-                    SDL_DestroyTexture(textTexture);
-                }
-                SDL_FreeSurface(textSurface);
-            }
-            TTF_CloseFont(font);
-        }
-    }
-}
-
-bool Button::handleEvent(SDL_Event *event)
-{
-    if (!visible || !enabled)
-        return false;
-
-    if (event->type == SDL_MOUSEMOTION)
-    {
-        isHovered = containsPoint(event->motion.x, event->motion.y);
-    }
-    else if (event->type == SDL_MOUSEBUTTONDOWN)
-    {
-        if (event->button.button == SDL_BUTTON_LEFT)
-        {
-            if (containsPoint(event->button.x, event->button.y))
-            {
-                if (onClick)
-                    onClick();
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-void Button::setText(const std::string &buttonText)
-{
-    text = buttonText;
-}
-
-void Button::setOnClick(std::function<void()> callback)
-{
-    onClick = callback;
-}
-
-void Button::setColors(SDL_Color text, SDL_Color background, SDL_Color hover)
-{
-    textColor = text;
-    backgroundColor = background;
-    hoverColor = hover;
-}
-
-// Label definitions
-Label::Label(int x, int y, int w, int h, const std::string &labelText)
-    : UIComponent(x, y, w, h), text(labelText), isMultiline(false), font(nullptr)
-{
-    textColor = {255, 255, 255, 255};
-}
-
-Label::~Label()
-{
-    if (font)
-    {
-        TTF_CloseFont(font);
-    }
-}
-
-void Label::render(SDL_Renderer *renderer)
-{
-    if (!visible)
-        return;
-
-    if (text.empty())
-        return;
-
-    // Use a default font if none is set
-    TTF_Font *fontToUse = font;
-    if (!fontToUse)
-    {
-        fontToUse = TTF_OpenFont("fonts/default.ttf", 16);
-    }
-
-    if (fontToUse)
-    {
-        if (isMultiline)
-        {
-            // Handle multiline text
-            size_t pos = 0;
-            int y = bounds.y;
-            while (pos < text.length())
-            {
-                size_t newlinePos = text.find('\n', pos);
-                std::string line;
-                if (newlinePos != std::string::npos)
-                {
-                    line = text.substr(pos, newlinePos - pos);
-                    pos = newlinePos + 1;
-                }
-                else
-                {
-                    line = text.substr(pos);
-                    pos = text.length();
-                }
-
-                SDL_Surface *textSurface = TTF_RenderText_Blended(fontToUse, line.c_str(), textColor);
-                if (textSurface)
-                {
-                    SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-                    if (textTexture)
-                    {
-                        SDL_Rect textRect = {
-                            bounds.x,
-                            y,
-                            textSurface->w,
-                            textSurface->h};
-                        SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
-                        SDL_DestroyTexture(textTexture);
-                    }
-                    y += textSurface->h;
-                    SDL_FreeSurface(textSurface);
-                }
-            }
-        }
-        else
-        {
-            // Single line text
-            SDL_Surface *textSurface = TTF_RenderText_Blended(fontToUse, text.c_str(), textColor);
-            if (textSurface)
-            {
-                SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-                if (textTexture)
-                {
-                    SDL_Rect textRect = {
-                        bounds.x,
-                        bounds.y,
-                        textSurface->w,
-                        textSurface->h};
-                    SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
-                    SDL_DestroyTexture(textTexture);
-                }
-                SDL_FreeSurface(textSurface);
-            }
-        }
-
-        if (!font)
-        {
-            TTF_CloseFont(fontToUse);
-        }
-    }
-}
-
-bool Label::handleEvent(SDL_Event *event)
-{
-    // Labels typically don't respond to events
-    return false;
-}
-
-void Label::setText(const std::string &labelText)
-{
-    text = labelText;
-}
-
-std::string Label::getText() const
-{
-    return text;
-}
-
-void Label::setTextColor(SDL_Color color)
-{
-    textColor = color;
-}
-
-void Label::setFont(TTF_Font *newFont)
-{
-    if (font && font != newFont)
-    {
-        TTF_CloseFont(font);
-    }
-    font = newFont;
-}
-
-// ProgressBar definitions
-ProgressBar::ProgressBar(int x, int y, int w, int h)
-    : UIComponent(x, y, w, h), value(0.0f), isDraggable(false)
-{
-    fillColor = {0, 128, 255, 255};
-    backgroundColor = {40, 40, 40, 255};
-}
-
-void ProgressBar::render(SDL_Renderer *renderer)
-{
-    if (!visible)
-        return;
-
-    // Draw background
-    SDL_SetRenderDrawColor(renderer, backgroundColor.r, backgroundColor.g, backgroundColor.b, backgroundColor.a);
-    SDL_RenderFillRect(renderer, &bounds);
-
-    // Draw filled portion
-    SDL_Rect fillRect = {
-        bounds.x,
-        bounds.y,
-        static_cast<int>(bounds.w * value),
-        bounds.h};
-    SDL_SetRenderDrawColor(renderer, fillColor.r, fillColor.g, fillColor.b, fillColor.a);
-    SDL_RenderFillRect(renderer, &fillRect);
-
-    // Draw border
-    SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
-    SDL_RenderDrawRect(renderer, &bounds);
-}
-
-bool ProgressBar::handleEvent(SDL_Event *event)
-{
-    if (!visible || !enabled || !isDraggable)
-        return false;
-
-    if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEMOTION)
-    {
-        if (event->type == SDL_MOUSEMOTION && !(event->motion.state & SDL_BUTTON_LMASK))
-        {
-            return false;
-        }
-
-        if (containsPoint(event->button.x, event->button.y) ||
-            (event->type == SDL_MOUSEMOTION && (event->motion.state & SDL_BUTTON_LMASK)))
-        {
-            float newValue = static_cast<float>(event->button.x - bounds.x) / bounds.w;
-            newValue = std::max(0.0f, std::min(1.0f, newValue));
-            setValue(newValue);
-            return true;
-        }
-    }
-    return false;
-}
-
-void ProgressBar::setValue(float newValue)
-{
-    value = std::max(0.0f, std::min(1.0f, newValue));
-    if (onValueChanged)
-    {
-        onValueChanged(value);
-    }
-}
-
-float ProgressBar::getValue() const
-{
-    return value;
-}
-
-void ProgressBar::setIsDraggable(bool draggable)
-{
-    isDraggable = draggable;
-}
-
-void ProgressBar::setOnValueChanged(std::function<void(float)> callback)
-{
-    onValueChanged = callback;
-}
-
-void ProgressBar::setColors(SDL_Color fill, SDL_Color background)
-{
-    fillColor = fill;
-    backgroundColor = background;
-}
-
-// ListView definitions
-ListView::ListView(int x, int y, int w, int h)
-    : UIComponent(x, y, w, h), selectedIndex(-1), firstVisibleIndex(0), visibleItemCount(10), hasScrollbar(true)
-{
-}
-
-void ListView::render(SDL_Renderer *renderer)
-{
-    if (!visible)
-        return;
-
-    // Draw background
-    SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
-    SDL_RenderFillRect(renderer, &bounds);
-
-    // Draw border
-    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_RenderDrawRect(renderer, &bounds);
-
-    // Calculate item height based on visible count
-    int itemHeight = bounds.h / visibleItemCount;
-
-    // Draw visible items
-    TTF_Font *font = TTF_OpenFont("fonts/default.ttf", 14);
-    if (font)
-    {
-        int endIndex = std::min(firstVisibleIndex + visibleItemCount, static_cast<int>(items.size()));
-        for (int i = firstVisibleIndex; i < endIndex; i++)
-        {
-            SDL_Rect itemRect = {
-                bounds.x,
-                bounds.y + (i - firstVisibleIndex) * itemHeight,
-                bounds.w - (hasScrollbar ? 20 : 0),
-                itemHeight};
-
-            // Draw selected item highlight
-            if (i == selectedIndex)
-            {
-                SDL_SetRenderDrawColor(renderer, 60, 100, 160, 255);
-                SDL_RenderFillRect(renderer, &itemRect);
-            }
-
-            // Draw item text
-            SDL_Color textColor = {255, 255, 255, 255};
-            SDL_Surface *textSurface = TTF_RenderText_Blended(font, items[i].c_str(), textColor);
-            if (textSurface)
-            {
-                SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-                if (textTexture)
-                {
-                    SDL_Rect textRect = {
-                        itemRect.x + 5,
-                        itemRect.y + (itemHeight - textSurface->h) / 2,
-                        textSurface->w,
-                        textSurface->h};
-                    SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
-                    SDL_DestroyTexture(textTexture);
-                }
-                SDL_FreeSurface(textSurface);
-            }
-
-            // Draw item separator
-            SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
-            SDL_RenderDrawLine(renderer, itemRect.x, itemRect.y + itemHeight - 1,
-                               itemRect.x + itemRect.w, itemRect.y + itemHeight - 1);
-        }
-        TTF_CloseFont(font);
-
-        // Draw scrollbar if needed
-        if (hasScrollbar && items.size() > visibleItemCount)
-        {
-            SDL_Rect scrollbarBg = {
-                bounds.x + bounds.w - 20,
-                bounds.y,
-                20,
-                bounds.h};
-            SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255);
-            SDL_RenderFillRect(renderer, &scrollbarBg);
-
-            // Calculate scrollbar handle size and position
-            float handleRatio = static_cast<float>(visibleItemCount) / items.size();
-            int handleHeight = std::max(20, static_cast<int>(bounds.h * handleRatio));
-            int handleY = bounds.y + (bounds.h - handleHeight) *
-                                         (static_cast<float>(firstVisibleIndex) / (items.size() - visibleItemCount));
-
-            SDL_Rect scrollHandle = {
-                bounds.x + bounds.w - 18,
-                handleY,
-                16,
-                handleHeight};
-            SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-            SDL_RenderFillRect(renderer, &scrollHandle);
-        }
-    }
-}
-
-bool ListView::handleEvent(SDL_Event *event)
-{
-    if (!visible || !enabled)
-        return false;
-
-    if (event->type == SDL_MOUSEBUTTONDOWN)
-    {
-        if (event->button.button == SDL_BUTTON_LEFT)
-        {
-            if (containsPoint(event->button.x, event->button.y))
-            {
-                if (hasScrollbar && event->button.x > bounds.x + bounds.w - 20)
-                {
-                    // Clicked on scrollbar
-                    float clickPosition = static_cast<float>(event->button.y - bounds.y) / bounds.h;
-                    int maxFirstIndex = std::max(0, static_cast<int>(items.size()) - visibleItemCount);
-                    firstVisibleIndex = static_cast<int>(clickPosition * maxFirstIndex);
-                    firstVisibleIndex = std::max(0, std::min(maxFirstIndex, firstVisibleIndex));
-                }
-                else
-                {
-                    // Clicked on an item
-                    int itemHeight = bounds.h / visibleItemCount;
-                    int clickedIndex = firstVisibleIndex + (event->button.y - bounds.y) / itemHeight;
-
-                    if (clickedIndex >= 0 && clickedIndex < static_cast<int>(items.size()))
-                    {
-                        setSelectedIndex(clickedIndex);
-                    }
-                }
-                return true;
-            }
-        }
-    }
-    else if (event->type == SDL_MOUSEWHEEL)
-    {
-        if (containsPoint(event->wheel.x, event->wheel.y) ||
-            SDL_GetMouseFocus() == SDL_GetWindowFromID(event->wheel.windowID))
-        {
-            scroll(-event->wheel.y * 3); // Scroll 3 items at a time
-            return true;
-        }
-    }
-    return false;
-}
-
-void ListView::addItem(const std::string &item)
-{
-    items.push_back(item);
-}
-
-void ListView::removeItem(int index)
-{
-    if (index >= 0 && index < static_cast<int>(items.size()))
-    {
-        items.erase(items.begin() + index);
-        if (selectedIndex >= static_cast<int>(items.size()))
-        {
-            selectedIndex = items.empty() ? -1 : static_cast<int>(items.size()) - 1;
-        }
-    }
-}
-
-void ListView::clearItems()
-{
-    items.clear();
-    selectedIndex = -1;
-    firstVisibleIndex = 0;
-}
-
-size_t ListView::size() const
-{
-    return items.size();
-}
-
-void ListView::setItems(const std::vector<std::string> &newItems)
-{
-    items = newItems;
-    selectedIndex = items.empty() ? -1 : 0;
-    firstVisibleIndex = 0;
-}
-
-std::string ListView::getItem(int index) const
-{
-    if (index >= 0 && index < static_cast<int>(items.size()))
-    {
-        return items[index];
-    }
-    return "";
-}
-const std::vector<std::string>& ListView::getItems() const
-{
-    return items;
-}
-int ListView::getSelectedIndex() const
-{
-    return selectedIndex;
-}
-
-void ListView::setSelectedIndex(int index)
-{
-    if (index >= -1 && index < static_cast<int>(items.size()))
-    {
-        if (selectedIndex != index)
-        {
-            selectedIndex = index;
-            if (onSelectionChanged)
-            {
-                onSelectionChanged(selectedIndex);
-            }
-
-            // Auto-scroll to make selection visible if needed
-            if (selectedIndex < firstVisibleIndex)
-            {
-                firstVisibleIndex = selectedIndex;
-            }
-            else if (selectedIndex >= firstVisibleIndex + visibleItemCount)
-            {
-                firstVisibleIndex = selectedIndex - visibleItemCount + 1;
-            }
-        }
-    }
-}
-
-void ListView::setOnSelectionChanged(std::function<void(int)> callback)
-{
-    onSelectionChanged = callback;
-}
-
-void ListView::scroll(int amount)
-{
-    int maxFirstIndex = std::max(0, static_cast<int>(items.size()) - visibleItemCount);
-    firstVisibleIndex = std::max(0, std::min(maxFirstIndex, firstVisibleIndex + amount));
-}
-
-// TextField definitions
-TextField::TextField(int x, int y, int w, int h, const std::string &initialText)
-    : UIComponent(x, y, w, h), text(initialText), placeholder("Enter text..."),
-      isFocused(false), cursorPosition(initialText.length())
-{
-    textColor = {255, 255, 255, 255};
-    backgroundColor = {40, 40, 40, 255};
-    borderColor = {150, 150, 150, 255};
-}
-
-void TextField::render(SDL_Renderer *renderer)
-{
-    if (!visible)
-        return;
-
-    // Draw background
-    SDL_SetRenderDrawColor(renderer, backgroundColor.r, backgroundColor.g, backgroundColor.b, backgroundColor.a);
-    SDL_RenderFillRect(renderer, &bounds);
-
-    // Draw border (highlighted if focused)
-    if (isFocused)
-    {
-        SDL_SetRenderDrawColor(renderer, 0, 120, 215, 255);
-    }
-    else
-    {
-        SDL_SetRenderDrawColor(renderer, borderColor.r, borderColor.g, borderColor.b, borderColor.a);
-    }
-    SDL_RenderDrawRect(renderer, &bounds);
-
-    // Draw text or placeholder
-    TTF_Font *font = TTF_OpenFont("fonts/default.ttf", 16);
-    if (font)
-    {
-        std::string displayText = text.empty() && !isFocused ? placeholder : text;
-        SDL_Color displayColor = text.empty() && !isFocused ? SDL_Color{150, 150, 150, 255} : textColor;
-
-        SDL_Surface *textSurface = TTF_RenderText_Blended(font, displayText.c_str(), displayColor);
-        if (textSurface)
-        {
-            SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-            if (textTexture)
-            {
-                SDL_Rect textRect = {
-                    bounds.x + 5, // Padding
-                    bounds.y + (bounds.h - textSurface->h) / 2,
-                    textSurface->w,
-                    textSurface->h};
-                SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
-
-                // Draw cursor if focused
-                if (isFocused)
-                {
-                    std::string textBeforeCursor = displayText.substr(0, cursorPosition);
-                    int cursorX = bounds.x + 5;
-
-                    if (!textBeforeCursor.empty())
-                    {
-                        SDL_Surface *cursorPosSurface = TTF_RenderText_Blended(font, textBeforeCursor.c_str(), textColor);
-                        if (cursorPosSurface)
-                        {
-                            cursorX += cursorPosSurface->w;
-                            SDL_FreeSurface(cursorPosSurface);
-                        }
-                    }
-
-                    // Animate cursor blink
-                    Uint32 ticks = SDL_GetTicks();
-                    if ((ticks / 500) % 2 == 0)
-                    {
-                        SDL_SetRenderDrawColor(renderer, textColor.r, textColor.g, textColor.b, textColor.a);
-                        SDL_RenderDrawLine(renderer, cursorX, bounds.y + 5, cursorX, bounds.y + bounds.h - 5);
-                    }
-                }
-
-                SDL_DestroyTexture(textTexture);
-            }
-            SDL_FreeSurface(textSurface);
-        }
-        TTF_CloseFont(font);
-    }
-}
-
-bool TextField::handleEvent(SDL_Event *event)
-{
-    if (!visible || !enabled)
-        return false;
-
-    if (event->type == SDL_MOUSEBUTTONDOWN)
-    {
-        if (event->button.button == SDL_BUTTON_LEFT)
-        {
-            bool wasClicked = containsPoint(event->button.x, event->button.y);
-
-            if (wasClicked)
-            {
-                focus();
-
-                // Set cursor position based on click position (approximate)
-                if (!text.empty())
-                {
-                    TTF_Font *font = TTF_OpenFont("fonts/default.ttf", 16);
-                    if (font)
-                    {
-                        int clickX = event->button.x - bounds.x - 5; // Adjust for padding
-                        int bestDistance = INT_MAX;
-                        int bestPos = 0;
-
-                        // Find the closest character position to the click
-                        for (size_t i = 0; i <= text.length(); i++)
-                        {
-                            std::string textPart = text.substr(0, i);
-                            SDL_Surface *surface = TTF_RenderText_Blended(font, textPart.c_str(), textColor);
-                            if (surface)
-                            {
-                                int distance = abs(surface->w - clickX);
-                                if (distance < bestDistance)
-                                {
-                                    bestDistance = distance;
-                                    bestPos = i;
-                                }
-                                SDL_FreeSurface(surface);
-                            }
-                        }
-
-                        cursorPosition = bestPos;
-                        TTF_CloseFont(font);
-                    }
-                }
-                else
-                {
-                    cursorPosition = 0;
-                }
-            }
-            else
-            {
-                unfocus();
-            }
-
-            return wasClicked;
-        }
-    }
-    else if (event->type == SDL_KEYDOWN && isFocused)
-    {
-        if (event->key.keysym.sym == SDLK_LEFT)
-        {
-            if (cursorPosition > 0)
-            {
-                cursorPosition--;
-            }
-        }
-        else if (event->key.keysym.sym == SDLK_RIGHT)
-        {
-            if (cursorPosition < text.length())
-            {
-                cursorPosition++;
-            }
-        }
-        else if (event->key.keysym.sym == SDLK_BACKSPACE)
-        {
-            if (cursorPosition > 0)
-            {
-                text.erase(cursorPosition - 1, 1);
-                cursorPosition--;
-                if (onTextChanged)
-                {
-                    onTextChanged(text);
-                }
-            }
-        }
-        else if (event->key.keysym.sym == SDLK_DELETE)
-        {
-            if (cursorPosition < text.length())
-            {
-                text.erase(cursorPosition, 1);
-                if (onTextChanged)
-                {
-                    onTextChanged(text);
-                }
-            }
-        }
-        else if (event->key.keysym.sym == SDLK_RETURN || event->key.keysym.sym == SDLK_KP_ENTER)
-        {
-            unfocus();
-        }
-        else if (event->key.keysym.sym == SDLK_HOME)
-        {
-            cursorPosition = 0;
-        }
-        else if (event->key.keysym.sym == SDLK_END)
-        {
-            cursorPosition = text.length();
-        }
-        else if (event->key.keysym.sym == SDLK_c && (event->key.keysym.mod & KMOD_CTRL))
-        {
-            // Ctrl+C: Copy to clipboard
-            SDL_SetClipboardText(text.c_str());
-        }
-        else if (event->key.keysym.sym == SDLK_v && (event->key.keysym.mod & KMOD_CTRL))
-        {
-            // Ctrl+V: Paste from clipboard
-            char *clipboardText = SDL_GetClipboardText();
-            if (clipboardText)
-            {
-                text.insert(cursorPosition, clipboardText);
-                cursorPosition += strlen(clipboardText);
-                SDL_free(clipboardText);
-
-                if (onTextChanged)
-                {
-                    onTextChanged(text);
-                }
-            }
-        }
-        else if (event->key.keysym.sym == SDLK_a && (event->key.keysym.mod & KMOD_CTRL))
-        {
-            // Ctrl+A: Select all (move cursor to end)
-            cursorPosition = text.length();
-        }
-        else
-        {
-            // Handle text input via SDL_TEXTINPUT events instead
-        }
-        return true;
-    }
-    else if (event->type == SDL_TEXTINPUT && isFocused)
-    {
-        // Insert the text at the cursor position
-        text.insert(cursorPosition, event->text.text);
-        cursorPosition += strlen(event->text.text);
-
-        if (onTextChanged)
-        {
-            onTextChanged(text);
-        }
-        return true;
-    }
-
-    return false;
-}
-
-void TextField::setText(const std::string &newText)
-{
-    text = newText;
-    cursorPosition = text.length();
-    if (onTextChanged)
-    {
-        onTextChanged(text);
-    }
-}
-
-std::string TextField::getText() const
-{
-    return text;
-}
-
-void TextField::setPlaceholder(const std::string &placeholderText)
-{
-    placeholder = placeholderText;
-}
-
-void TextField::setOnTextChanged(std::function<void(const std::string &)> callback)
-{
-    onTextChanged = callback;
-}
-
-void TextField::focus()
-{
-    isFocused = true;
-    SDL_StartTextInput();
-}
-
-void TextField::unfocus()
-{
-    isFocused = false;
-    SDL_StopTextInput();
-}
-
-// VolumeSlider definitions
-VolumeSlider::VolumeSlider(int x, int y, int w, int h)
-    : UIComponent(x, y, w, h), volume(80), isDragging(false)
-{
-    fillColor = {0, 128, 255, 255};
-    backgroundColor = {40, 40, 40, 255};
-    knobColor = {200, 200, 200, 255};
-}
-
-// Helper function for drawing filled circle in VolumeSlider
-void filledCircleRGBA(SDL_Renderer *renderer, int x, int y, int radius, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
-{
-    for (int w = 0; w < radius * 2; w++)
-    {
-        for (int h = 0; h < radius * 2; h++)
-        {
-            int dx = radius - w;
-            int dy = radius - h;
-            if ((dx * dx + dy * dy) <= (radius * radius))
-            {
-                SDL_SetRenderDrawColor(renderer, r, g, b, a);
-                SDL_RenderDrawPoint(renderer, x + dx, y + dy);
-            }
-        }
-    }
-}
-
-void VolumeSlider::render(SDL_Renderer *renderer)
-{
-    if (!visible)
-        return;
-
-    // Draw background
-    SDL_SetRenderDrawColor(renderer, backgroundColor.r, backgroundColor.g, backgroundColor.b, backgroundColor.a);
-    SDL_RenderFillRect(renderer, &bounds);
-
-    // Draw filled portion
-    SDL_Rect fillRect = {
-        bounds.x,
-        bounds.y,
-        static_cast<int>(bounds.w * volume / 100),
-        bounds.h};
-    SDL_SetRenderDrawColor(renderer, fillColor.r, fillColor.g, fillColor.b, fillColor.a);
-    SDL_RenderFillRect(renderer, &fillRect);
-
-    // Draw knob
-    int knobX = bounds.x + static_cast<int>(bounds.w * volume / 100);
-    int knobY = bounds.y + bounds.h / 2;
-    int knobRadius = bounds.h / 2;
-
-    filledCircleRGBA(renderer, knobX, knobY, knobRadius,
-                     knobColor.r, knobColor.g, knobColor.b, knobColor.a);
-
-    // Draw border
-    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_RenderDrawRect(renderer, &bounds);
-
-    // Draw volume level indicator
-    TTF_Font *font = TTF_OpenFont("fonts/default.ttf", 12);
-    if (font)
-    {
-        SDL_Color textColor = {255, 255, 255, 255};
-        std::string volumeText = std::to_string(volume) + "%";
-        SDL_Surface *textSurface = TTF_RenderText_Blended(font, volumeText.c_str(), textColor);
-        if (textSurface)
-        {
-            SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-            if (textTexture)
-            {
-                SDL_Rect textRect = {
-                    bounds.x + bounds.w + 5,
-                    bounds.y + (bounds.h - textSurface->h) / 2,
-                    textSurface->w,
-                    textSurface->h};
-                SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
-                SDL_DestroyTexture(textTexture);
-            }
-            SDL_FreeSurface(textSurface);
-        }
-        TTF_CloseFont(font);
-    }
-}
-
-bool VolumeSlider::handleEvent(SDL_Event *event)
-{
-    if (!visible || !enabled)
-        return false;
-
-    if (event->type == SDL_MOUSEBUTTONDOWN)
-    {
-        if (event->button.button == SDL_BUTTON_LEFT && containsPoint(event->button.x, event->button.y))
-        {
-            isDragging = true;
-            int newVolume = (event->button.x - bounds.x) * 100 / bounds.w;
-            setVolume(newVolume);
-            return true;
-        }
-    }
-    else if (event->type == SDL_MOUSEBUTTONUP)
-    {
-        if (event->button.button == SDL_BUTTON_LEFT)
-        {
-            isDragging = false;
-        }
-    }
-    else if (event->type == SDL_MOUSEMOTION)
-    {
-        if (isDragging)
-        {
-            int newVolume = (event->motion.x - bounds.x) * 100 / bounds.w;
-            setVolume(newVolume);
-            return true;
-        }
-    }
-    return false;
-}
-
-void VolumeSlider::setVolume(int newVolume)
-{
-    volume = std::max(0, std::min(100, newVolume));
-    if (onVolumeChanged)
-    {
-        onVolumeChanged(volume);
-    }
-}
-
-int VolumeSlider::getVolume() const
-{
-    return volume;
-}
-
-void VolumeSlider::setOnVolumeChanged(std::function<void(int)> callback)
-{
-    onVolumeChanged = callback;
-}
-
-
-// Pagination definitions
-Pagination::Pagination(int x, int y, int w, int h) : UIComponent(x, y, w, h), currentPage(0), totalPages(1)
-{
-    int buttonWidth = 80;
-    int labelWidth = w - 2 * buttonWidth;
-
-    prevButton = new Button(x, y, buttonWidth, h, "Previous");
-    nextButton = new Button(x + w - buttonWidth, y, buttonWidth, h, "Next");
-    pageLabel = new Label(x + buttonWidth, y, labelWidth, h, "Page 1 of 1");
-
-    // Center the text in the label
-    pageLabel->setTextColor({255, 255, 255, 255});
-
-    // Set button callbacks
-    prevButton->setOnClick([this]()
-                           {
-        if (currentPage > 0) {
-            setCurrentPage(currentPage - 1);
-        } });
-
-    nextButton->setOnClick([this]()
-                           {
-        if (currentPage < totalPages - 1) {
-            setCurrentPage(currentPage + 1);
-        } });
-
-    // Update button states
-    updateButtonStates();
-}
-
-Pagination::~Pagination()
-{
-    delete prevButton;
-    delete nextButton;
-    delete pageLabel;
-}
-
-void Pagination::render(SDL_Renderer *renderer)
-{
-    if (!visible)
-        return;
-
-    prevButton->render(renderer);
-    nextButton->render(renderer);
-    pageLabel->render(renderer);
-}
-
-bool Pagination::handleEvent(SDL_Event *event)
-{
-    if (!visible || !enabled)
-        return false;
-
-    return prevButton->handleEvent(event) ||
-           nextButton->handleEvent(event) ||
-           pageLabel->handleEvent(event);
-}
-
-void Pagination::setCurrentPage(int page)
-{
-    if (page >= 0 && page < totalPages && page != currentPage)
-    {
-        currentPage = page;
-        updateButtonStates();
-
-        if (onPageChanged)
-        {
-            onPageChanged(currentPage);
-        }
-    }
-}
-
-int Pagination::getCurrentPage() const
-{
-    return currentPage;
-}
-
-void Pagination::setTotalPages(int pages)
-{
-    totalPages = std::max(1, pages);
-
-    if (currentPage >= totalPages)
-    {
-        currentPage = totalPages - 1;
-        if (onPageChanged)
-        {
-            onPageChanged(currentPage);
-        }
-    }
-
-    updateButtonStates();
-}
-
-void Pagination::setOnPageChanged(std::function<void(int)> callback)
-{
-    onPageChanged = callback;
-}
-
-void Pagination::updateButtonStates()
-{
-    prevButton->setEnabled(currentPage > 0);
-    nextButton->setEnabled(currentPage < totalPages - 1);
-
-    std::string pageText = "Page " + std::to_string(currentPage + 1) + " of " + std::to_string(totalPages);
-    pageLabel->setText(pageText);
-}
-
-// Base View class definitions
-View::View(ApplicationController *appController) : active(false), controller(appController)
-{
-}
+// Implementation for View class
+View::View() : active(false) {}
 
 View::~View()
 {
-    for (UIComponent *component : components)
+    // Clean up all components
+    for (auto &component : components)
     {
         delete component;
     }
     components.clear();
 }
 
+// Render all the componenet
 void View::render(SDL_Renderer *renderer)
 {
+    // Set background for playlist area
+    SDL_SetRenderDrawColor(renderer, PANEL_COLOR.r, PANEL_COLOR.g, PANEL_COLOR.b, PANEL_COLOR.a);
+    SDL_RenderFillRect(renderer, &viewBounds);
+    // Panel border
+    SDL_SetRenderDrawColor(renderer, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, BORDER_COLOR.a);
+    SDL_RenderDrawRect(renderer, &viewBounds);
     if (!active)
         return;
 
-    // Draw background
-    SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-    SDL_RenderClear(renderer);
-
     // Render all components
-    for (UIComponent *component : components)
+    for (auto &component : components)
     {
         if (component->isVisible())
         {
@@ -1140,26 +49,23 @@ bool View::handleEvent(SDL_Event *event)
     if (!active)
         return false;
 
-    // Pass event to all components in reverse order (top-most first)
+    // Handle events for all components in reverse order (top-most first)
     for (auto it = components.rbegin(); it != components.rend(); ++it)
     {
-        UIComponent *component = *it;
-        if (component->isVisible() && component->isEnabled())
+        if ((*it)->isVisible() && (*it)->isEnabled())
         {
-            if (component->handleEvent(event))
+            if ((*it)->handleEvent(event))
             {
-                return true;
+                return true; // Event was handled
             }
         }
     }
-
     return false;
 }
 
 void View::show()
 {
     active = true;
-    update();
 }
 
 void View::hide()
@@ -1177,6 +83,7 @@ void View::removeComponent(UIComponent *component)
     auto it = std::find(components.begin(), components.end(), component);
     if (it != components.end())
     {
+
         components.erase(it);
     }
 }
@@ -1185,153 +92,191 @@ bool View::isActive() const
 {
     return active;
 }
-
-// MediaListView definitions
-MediaListView::MediaListView(ApplicationController *controller)
-    : View(controller), itemsPerPage(25)
+bool View::isInViewRect(int x, int y)
 {
+    return (x >= viewBounds.x && x < viewBounds.x + viewBounds.w &&
+            y >= viewBounds.y && y < viewBounds.y + viewBounds.h);
+}
 
-    // Create file list view
-    fileListView = new ListView(20, 60, 760, 400);
-    fileListView->setOnSelectionChanged([this](int index)
-                                        { onFileSelected(index); });
+// MediaListView Implementation
+MediaListView::MediaListView(MediaListController *controller)
+    : controller(controller), itemsPerPage(25)
+{
+    viewBounds = {240, 20, 500, 500};
+    // Create components
+    fileListView = new ListView(245, 50, 490, 430);
+    pagination = new Pagination(385, 480, 210, 30);
+    // Create title label
+    titleLabel = new TextComponent(450, 25, 90, 15, "Media List");
+    // Create scan directory button
+    openFolderButton = new Button(25, 485, 190, 30, "Open Folder");
 
-    // Create pagination
-    pagination = new Pagination(250, 470, 300, 30);
-    pagination->setOnPageChanged([this](int page)
-                                 { setCurrentPage(page); });
-
-    // Create buttons
-    playButton = new Button(20, 520, 150, 40, "Play");
-    playButton->setOnClick([this, &controller]()
-                           {
-        int selectedIndex = fileListView->getSelectedIndex();
-        if (selectedIndex >= 0 && selectedIndex < static_cast<int>(currentFiles.size())) {
-            // Play the selected file using the controller
-            auto mediaController = controller->getPlayerController();
-            if (mediaController) {
-                mediaController->playMedia(std::make_shared<MediaFileModel>(currentFiles[selectedIndex]));
-            }
-        } });
-
-    addToPlaylistButton = new Button(190, 520, 150, 40, "Add to Playlist");
-    addToPlaylistButton->setOnClick([this, &controller]()
-                                    {
-        int selectedIndex = fileListView->getSelectedIndex();
-        if (selectedIndex >= 0 && selectedIndex < static_cast<int>(currentFiles.size())) {
-            // Show context menu to select playlist
-            // For simplicity, we'll just add to the current playlist
-            auto playlistController = controller->getPlaylistController();
-            if (playlistController) {
-                playlistController->addToCurrentPlaylist(std::make_shared<MediaFileModel>(currentFiles[selectedIndex]));
-            }
-        } });
-
-    viewMetadataButton = new Button(360, 520, 150, 40, "View Metadata");
-    viewMetadataButton->setOnClick([this, controller]()
-                                   {
-        int selectedIndex = fileListView->getSelectedIndex();
-        if (selectedIndex >= 0 && selectedIndex < static_cast<int>(currentFiles.size())) {
-            // Show metadata view for the selected file
-            auto metadataController = controller->getMetadataController();
-            if (metadataController) {
-                metadataController->loadMetadata(std::make_shared<MediaFileModel>(currentFiles[selectedIndex]));
-                // Navigate to metadata view
-                // This would be handled by the controller
-            }
-        } });
-
-    // Create search field
-    searchField = new TextField(520, 520, 260, 40, "");
-    searchField->setPlaceholder("Search media...");
-    searchField->setOnTextChanged([this, &controller](const std::string &text)
-                                  {
-        if (text.empty()) {
-            // Reset to show all files
-            update();
-        } else {
-            // Search and update the list
-            auto searchResults = controller->searchMedia(text);
-            std::vector<MediaFileModel> results;
-            for (auto &file : searchResults) {
-                results.push_back(*file);
-            }
-            updateFileList(results);
-        } });
-
-    // Add all components
+    // Add components to view
     addComponent(fileListView);
     addComponent(pagination);
-    addComponent(playButton);
-    addComponent(addToPlaylistButton);
-    addComponent(viewMetadataButton);
-    addComponent(searchField);
-
-    // Create a title label
-    Label *titleLabel = new Label(20, 20, 760, 30, "Media Library");
-    titleLabel->setTextColor({255, 255, 255, 255});
     addComponent(titleLabel);
+    addComponent(openFolderButton);
+
+    titleLabel->setAlign(TextComponent::TextAlign::Center);
+
+    pagination->setVisible(false);
+
+    show();
 }
 
 MediaListView::~MediaListView()
 {
-    // Base class destructor will delete the components
+    // Base destructor will handle component deletion
+}
+
+void MediaListView::setMediaListController(MediaListController *controller)
+{
+    this->controller = controller;
+    // Setup UI components
+    fileListView->setOnSelectionChanged([this](int index)
+                                        { onFileSelected(index); });
+    fileListView->setOn2ClickSelectionChanged([this](int index)
+                                              { onFile2ClickSelected(index); });
+
+    pagination->setOnPageChanged([this](int page)
+                                 { setCurrentPage(page); });
+
+    openFolderButton->setOnClick([this]()
+                                 { scanDirectoryForMedia(); });
 }
 
 void MediaListView::render(SDL_Renderer *renderer)
 {
+    // Default rendering done by base class
     View::render(renderer);
-
-    // Additional custom rendering if needed
 }
 
 bool MediaListView::handleEvent(SDL_Event *event)
 {
+    // Handle right-click on list items
+    if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_RIGHT)
+    {
+        int x = event->button.x;
+        int y = event->button.y;
+
+        if (fileListView->containsPoint(x, y))
+        {
+            // Calculate which item was clicked
+            SDL_Rect bounds = fileListView->getBounds();
+            int itemHeight = 30; // Assuming each item is 30px high
+            int itemIndex = fileListView->getSelectedIndex();
+
+            if (itemIndex >= 0 && itemIndex < static_cast<int>(fileListView->size()))
+            {
+                showFileContextMenu(x, y, itemIndex);
+                return true;
+            }
+        }
+    }
+
     return View::handleEvent(event);
 }
 
 void MediaListView::update()
 {
-    // Get the media files from the library
-    auto mediaLibrary = controller->getMediaLibrary();
-    if (mediaLibrary)
-    {
-        std::vector<MediaFileModel> allFiles;
-        for (auto &file : mediaLibrary->getMediaFiles())
-        {
-            allFiles.push_back(*file);
-        }
-        updateFileList(allFiles);
-    }
 }
 
-void MediaListView::updateFileList(const std::vector<MediaFileModel> &files)
+void MediaListView::scanDirectoryForMedia()
 {
-    currentFiles = files;
+    std::filesystem::path result;
 
-    // Calculate total pages
-    int totalItems = static_cast<int>(files.size());
-    int pages = (totalItems + itemsPerPage - 1) / itemsPerPage;
-    pagination->setTotalPages(pages);
+#ifdef _WIN32
 
-    // Update the current page
-    setCurrentPage(pagination->getCurrentPage());
+    HWND owner = nullptr;
+
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (FAILED(hr))
+    {
+        return;
+    }
+
+    IFileDialog *pFileDialog = nullptr;
+    hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFileDialog));
+    if (FAILED(hr))
+    {
+        CoUninitialize();
+        return;
+    }
+
+    // Set the options on the dialog to select folders only
+    DWORD options;
+    pFileDialog->GetOptions(&options);
+    pFileDialog->SetOptions(options | FOS_PICKFOLDERS);
+
+    // Show the dialog
+    hr = pFileDialog->Show(owner);
+    if (SUCCEEDED(hr))
+    {
+        IShellItem *pItem;
+        hr = pFileDialog->GetResult(&pItem);
+        if (SUCCEEDED(hr))
+        {
+            PWSTR folderPath = nullptr;
+            hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &folderPath);
+
+            if (SUCCEEDED(hr))
+            {
+                result.assign(folderPath);
+                CoTaskMemFree(folderPath);
+            }
+
+            pItem->Release();
+            pFileDialog->Release();
+            CoUninitialize();
+            return controller->scanDirectoryForMedia(result);
+        }
+    }
+
+    pFileDialog->Release();
+    CoUninitialize();
+    return;
+
+#endif
+}
+
+void MediaListView::setCurrentPlaylist(const std::string &playlistName, const std::vector<std::string> &mediaFilesNames)
+{
+    currentFilesName.clear();
+    for (const auto &file : mediaFilesNames)
+    {
+        currentFilesName.push_back(file);
+    }
+
+    fileListView->clearItems();
+    for (const auto &name : currentFilesName)
+    {
+        fileListView->addItem(name);
+    }
+
+    titleLabel->setText(playlistName);
+
+    // Update pagination
+    int totalFiles = currentFilesName.size();
+    int totalPages = (totalFiles + itemsPerPage - 1) / itemsPerPage;
+    pagination->setTotalPages(totalPages);
+    pagination->setCurrentPage(0);
+
+    // Update visibility of pagination
+    pagination->setVisible(totalPages > 1);
+
+    update();
 }
 
 void MediaListView::setCurrentPage(int page)
 {
-    // Get items for the current page
     int startIdx = page * itemsPerPage;
-    int endIdx = std::min(startIdx + itemsPerPage, static_cast<int>(currentFiles.size()));
+    int endIdx = std::min(startIdx + itemsPerPage, static_cast<int>(currentFilesName.size()));
 
-    // Update the list view
-    std::vector<std::string> items;
-    for (int i = startIdx; i < endIdx; i++)
+    fileListView->clearItems();
+    for (int i = startIdx; i < endIdx; ++i)
     {
-        items.push_back(currentFiles[i].getFilename());
+        fileListView->addItem(currentFilesName[i]);
     }
-
-    fileListView->setItems(items);
 }
 
 int MediaListView::getCurrentPage() const
@@ -1341,321 +286,106 @@ int MediaListView::getCurrentPage() const
 
 int MediaListView::getTotalPages() const
 {
-    return (static_cast<int>(currentFiles.size()) + itemsPerPage - 1) / itemsPerPage;
+    return pagination->getTotalPages();
 }
 
 void MediaListView::onFileSelected(int index)
 {
-    // Enable buttons when a file is selected
-    bool hasSelection = index >= 0;
-    playButton->setEnabled(hasSelection);
-    addToPlaylistButton->setEnabled(hasSelection);
-    viewMetadataButton->setEnabled(hasSelection);
+    controller->handleMediaSelected(index);
+}
+void MediaListView::onFile2ClickSelected(int index)
+{
+    controller->handleMediaPlay(index);
 }
 
 void MediaListView::showFileContextMenu(int x, int y, int fileIndex)
 {
-    // This would typically show a popup menu with options
-    // For simplicity, we'll just log the action
-    SDL_Log("Context menu for file %d at %d,%d", fileIndex, x, y);
+    // This would create a context menu at the given position
+    // Implementation depends on how you want to implement context menus
+    // For now, just a placeholder
 }
 
-// PlaylistView definitions
-PlaylistView::PlaylistView(ApplicationController *controller)
-    : View(controller), currentPlaylist(nullptr)
+// PlayerView Implementation
+PlayerView::PlayerView(PlayerController *controller)
+    : isPlaying(false), controller(controller)
 {
+    viewBounds = {20, 550, 960, 100};
+    // Create components for the player view
+    currentTrackLabel = new TextComponent(280, 575, 610, 30, "");
+    currentTimeLabel = new TextComponent(210, 605, 50, 30, "0:00");
+    totalTimeLabel = new TextComponent(910, 605, 50, 30, "0:00");
 
-    // Create playlist name label
-    playlistNameLabel = new Label(20, 20, 760, 30, "Playlist: None");
-    playlistNameLabel->setTextColor({255, 255, 255, 255});
+    playPauseButton = new Button(40, 600, 30, 30, "▶");
 
-    // Create playlist content list
-    playlistContent = new ListView(20, 60, 760, 400);
-    playlistContent->setOnSelectionChanged([this](int index)
-                                           {
-        // Enable buttons based on selection
-        bool hasSelection = index >= 0;
-        playButton->setEnabled(hasSelection);
-        removeButton->setEnabled(hasSelection);
-        moveUpButton->setEnabled(hasSelection > 0);
-        moveDownButton->setEnabled(hasSelection >= 0 && index < static_cast<int>(playlistContent->getItems().size()) - 1); });
+    stopButton = new Button(80, 600, 30, 30, "■");
 
-    // Create buttons
-    playButton = new Button(20, 480, 150, 40, "Play");
-    playButton->setEnabled(false);
-    playButton->setOnClick([this, &controller]()
-                           {
-        int selectedIndex = playlistContent->getSelectedIndex();
-        if (currentPlaylist && selectedIndex >= 0) {
-            // Play the selected item and continue with the playlist
-            auto playerController = controller->getPlayerController();
-            if (playerController) {
-                playerController->playPlaylist(std::make_shared<PlaylistModel>(*currentPlaylist), selectedIndex);
-            }
-        } });
+    previousButton = new Button(120, 600, 30, 30, "◀◀");
 
-    removeButton = new Button(190, 480, 150, 40, "Remove");
-    removeButton->setEnabled(false);
-    removeButton->setOnClick([this, &controller]()
-                             {
-        int selectedIndex = playlistContent->getSelectedIndex();
-        if (currentPlaylist && selectedIndex >= 0) {
-            // Remove the selected item from the playlist
-            auto playlistController = controller->getPlaylistController();
-            if (playlistController) {
-                playlistController->removeFromCurrentPlaylist(selectedIndex);
-                // Update the view after removing
-                setCurrentPlaylist(currentPlaylist);
-            }
-        } });
+    nextButton = new Button(160, 600, 30, 30, "▶▶");
 
-    moveUpButton = new Button(360, 480, 150, 40, "Move Up");
-    moveUpButton->setEnabled(false);
-    moveUpButton->setOnClick([this, &controller]()
-                             {
-        int selectedIndex = playlistContent->getSelectedIndex();
-        if (currentPlaylist && selectedIndex > 0) {
-            // Move item up in the playlist
-            auto playlistController = controller->getPlaylistController();
-            if (playlistController) {
-                playlistController->moveItemUp(selectedIndex);
-                // Update the view after moving
-                setCurrentPlaylist(currentPlaylist);
-                // Keep the same item selected
-                playlistContent->setSelectedIndex(selectedIndex - 1);
-            }
-        } });
+    progressBar = new ProgressBar(270, 615, 630, 10);
 
-    moveDownButton = new Button(530, 480, 150, 40, "Move Down");
-    moveDownButton->setEnabled(false);
-    moveDownButton->setOnClick([this, &controller]()
-                               {
-        int selectedIndex = playlistContent->getSelectedIndex();
-        if (currentPlaylist && selectedIndex >= 0 && 
-            selectedIndex < static_cast<int>(currentPlaylist->size()) - 1) {
-            // Move item down in the playlist
-            auto playlistController = controller->getPlaylistController();
-            if (playlistController) {
-                playlistController->moveItemDown(selectedIndex);
-                // Update the view after moving
-                setCurrentPlaylist(currentPlaylist);
-                // Keep the same item selected
-                playlistContent->setSelectedIndex(selectedIndex + 1);
-            }
-        } });
+    volumeSlider = new VolumeSlider(50, 570, 150, 15);
 
-    saveButton = new Button(360, 540, 150, 40, "Save Playlist");
-    saveButton->setOnClick([this, &controller]()
-                           {
-        if (currentPlaylist) {
-            // Save the playlist
-            auto playlistController = controller->getPlaylistController();
-            if (playlistController) {
-                playlistController->saveCurrentPlaylist();
-            }
-        } });
-
-    // Add all components
-    addComponent(playlistNameLabel);
-    addComponent(playlistContent);
-    addComponent(playButton);
-    addComponent(removeButton);
-    addComponent(moveUpButton);
-    addComponent(moveDownButton);
-    addComponent(saveButton);
-}
-
-PlaylistView::~PlaylistView()
-{
-    // Base class destructor will delete components
-}
-
-void PlaylistView::render(SDL_Renderer *renderer)
-{
-    View::render(renderer);
-
-    // Additional custom rendering if needed
-}
-
-bool PlaylistView::handleEvent(SDL_Event *event)
-{
-    return View::handleEvent(event);
-}
-
-void PlaylistView::update()
-{
-    // This will get called when the view becomes active
-    auto playlistController = controller->getPlaylistController();
-    if (playlistController)
-    {
-        // Get the current playlist from the controller
-        currentPlaylist = playlistController->getCurrentPlaylist().get();
-        setCurrentPlaylist(currentPlaylist);
-    }
-}
-
-void PlaylistView::setCurrentPlaylist(PlaylistModel *playlist)
-{
-    currentPlaylist = playlist;
-
-    if (playlist)
-    {
-        // Update playlist name
-        playlistNameLabel->setText("Playlist: " + playlist->getPlaylistName());
-
-        // Update playlist content
-        std::vector<std::string> items;
-        for (size_t i = 0; i < playlist->size(); i++)
-        {
-            auto mediaFile = playlist->getMediaFile(i);
-            if (mediaFile)
-            {
-                items.push_back(mediaFile->getFilename());
-            }
-        }
-
-        playlistContent->setItems(items);
-        saveButton->setEnabled(true);
-    }
-    else
-    {
-        // No playlist loaded
-        playlistNameLabel->setText("Playlist: None");
-        playlistContent->clearItems();
-        saveButton->setEnabled(false);
-    }
-
-    // Reset button states
-    playButton->setEnabled(false);
-    removeButton->setEnabled(false);
-    moveUpButton->setEnabled(false);
-    moveDownButton->setEnabled(false);
-}
-
-void PlaylistView::highlightPlaying(int index)
-{
-    // This could be implemented by using a different color for the playing item
-    // or by adding a special marker. For simplicity, we'll just select the item.
-    playlistContent->setSelectedIndex(index);
-}
-
-void PlaylistView::enterEditMode()
-{
-    // Enable editing controls
-    removeButton->setVisible(true);
-    moveUpButton->setVisible(true);
-    moveDownButton->setVisible(true);
-    saveButton->setVisible(true);
-}
-
-void PlaylistView::exitEditMode()
-{
-    // Disable editing controls
-    removeButton->setVisible(false);
-    moveUpButton->setVisible(false);
-    moveDownButton->setVisible(false);
-    saveButton->setVisible(false);
-}
-
-// PlayerView definitions
-PlayerView::PlayerView(ApplicationController *controller)
-    : View(controller), currentMedia(nullptr), isPlaying(false)
-{
-
-    // Create labels for track info
-    currentTrackLabel = new Label(20, 20, 760, 30, "No Track Playing");
-    currentTrackLabel->setTextColor({255, 255, 255, 255});
-
-    artistAlbumLabel = new Label(20, 50, 760, 20, "");
-    artistAlbumLabel->setTextColor({200, 200, 200, 255});
-
-    timeLabel = new Label(20, 80, 760, 20, "0:00 / 0:00");
-    timeLabel->setTextColor({200, 200, 200, 255});
-
-    // Create progress bar
-    progressBar = new ProgressBar(20, 110, 760, 15);
-    progressBar->setIsDraggable(true);
-    progressBar->setOnValueChanged([this, &controller](float value)
-                                   {
-        // Seek to the position
-        auto playerController = controller->getPlayerController();
-        if (playerController && currentMedia) {
-            int duration = playerController->getDuration();
-            playerController->seek(static_cast<int>(value * duration));
-        } });
-
-    // Create playback control buttons
-    playPauseButton = new Button(300, 140, 100, 40, "Play");
-    playPauseButton->setOnClick([this, &controller]()
-                                {
-        auto playerController = controller->getPlayerController();
-        if (playerController) {
-            if (playerController->isMediaPlaying()) {
-                if (playerController->isMediaPaused()) {
-                    playerController->play();
-                } else {
-                    playerController->pause();
-                }
-            } else if (currentMedia) {
-                playerController->playMedia(std::make_shared<MediaFileModel>(*currentMedia));
-            }
-        } });
-
-    stopButton = new Button(410, 140, 100, 40, "Stop");
-    stopButton->setOnClick([this, &controller]()
-                           {
-        auto playerController = controller->getPlayerController();
-        if (playerController) {
-            playerController->stop();
-        } });
-
-    previousButton = new Button(190, 140, 100, 40, "Previous");
-    previousButton->setOnClick([this, &controller]()
-                               {
-        auto playerController = controller->getPlayerController();
-        if (playerController) {
-            playerController->previous();
-        } });
-
-    nextButton = new Button(520, 140, 100, 40, "Next");
-    nextButton->setOnClick([this, &controller]()
-                           {
-        auto playerController = controller->getPlayerController();
-        if (playerController) {
-            playerController->next();
-        } });
-
-    // Create volume slider
-    volumeSlider = new VolumeSlider(300, 200, 200, 20);
-    volumeSlider->setOnVolumeChanged([this, &controller](int volume)
-                                     {
-        auto playerController = controller->getPlayerController();
-        if (playerController) {
-            playerController->setVolume(volume);
-        } });
-
-    // Add all components
+    // Add components to view
     addComponent(currentTrackLabel);
-    addComponent(artistAlbumLabel);
-    addComponent(timeLabel);
+    addComponent(currentTimeLabel);
+    addComponent(totalTimeLabel);
     addComponent(progressBar);
     addComponent(playPauseButton);
     addComponent(stopButton);
     addComponent(previousButton);
     addComponent(nextButton);
     addComponent(volumeSlider);
+
+    totalTimeLabel->setAlign(TextComponent::TextAlign::Left);
+    currentTimeLabel->setAlign(TextComponent::TextAlign::Right);
+    currentTrackLabel->setAlign(TextComponent::TextAlign::Center);
+
+    progressBar->setEnabled(false);
+
+    volumeSlider->setVolume(20);
+
+    show();
 }
 
 PlayerView::~PlayerView()
 {
-    // Base class destructor will delete components
+    // Base destructor will handle component deletion
+}
+
+void PlayerView::setPlayerController(PlayerController *controller)
+{
+    this->controller = controller;
+    progressBar->setIsDraggable(true);
+    progressBar->setOnValueChanged([this](float value)
+                                   { this->controller->seek(static_cast<int>(
+                                         value * this->controller->getDuration())); });
+    playPauseButton->setOnClick([this]()
+                                {
+        if (isPlaying) {
+            this->controller->pause();
+        } else {
+            this->controller->play();
+        } });
+
+    stopButton->setOnClick([this]()
+                           { this->controller->stop(); });
+
+    previousButton->setOnClick([this]()
+                               { this->controller->previous(); });
+
+    nextButton->setOnClick([this]()
+                           { this->controller->next(); });
+
+    volumeSlider->setOnVolumeChanged([this](int vol)
+                                     { this->controller->setVolume(vol); });
 }
 
 void PlayerView::render(SDL_Renderer *renderer)
 {
+    // Render components
     View::render(renderer);
-
-    // Additional custom rendering if needed
 }
 
 bool PlayerView::handleEvent(SDL_Event *event)
@@ -1665,142 +395,99 @@ bool PlayerView::handleEvent(SDL_Event *event)
 
 void PlayerView::update()
 {
-    auto playerController = controller->getPlayerController();
-    if (playerController)
+    if (isPlaying)
     {
-        // Update volume
-        volumeSlider->setVolume(playerController->getVolume());
+        updateProgress(controller->getCurrentPosition(), controller->getDuration());
 
-        // Update current media info
-        auto media = playerController->getCurrentMedia();
-        if (media)
-        {
-            setCurrentMedia(const_cast<MediaFileModel *>(media.get()));
-        }
-
-        // Update playback status
-        updatePlaybackStatus(playerController->isMediaPlaying() && !playerController->isMediaPaused());
-
-        // Update progress
-        updateProgress(playerController->getCurrentPosition(), playerController->getDuration());
+        // Update volume slider
+        volumeSlider->setVolume(controller->getVolume());
     }
 }
 
-void PlayerView::setBounds(int x, int y, int w, int h) {
-    // Store the bounds for the view
+void PlayerView::setBounds(int x, int y, int w, int h)
+{
     viewBounds = {x, y, w, h};
+}
+
+void PlayerView::setCurrentMedia(const std::string &trackName, const std::string &artist)
+{
+    std::string displayName = trackName;
+    if (!artist.empty())
+    {
+        displayName += " - " + artist;
+    }
+    currentTrackLabel->setText(displayName);
+
+    progressBar->setEnabled(true);
 }
 
 void PlayerView::updatePlaybackStatus(bool playing)
 {
     isPlaying = playing;
-    playPauseButton->setText(isPlaying ? "Pause" : "Play");
-}
-
-void PlayerView::setCurrentMedia(MediaFileModel *media)
-{
-    currentMedia = media;
-
-    if (media)
-    {
-        // Update track info
-        currentTrackLabel->setText(media->getFilename());
-
-        // Try to get artist and album from metadata
-        std::string artist = media->getMetadata("Artist");
-        std::string album = media->getMetadata("Album");
-        std::string artInfo = "";
-
-        if (!artist.empty())
-        {
-            artInfo += "Artist: " + artist;
-        }
-
-        if (!album.empty())
-        {
-            if (!artInfo.empty())
-                artInfo += " | ";
-            artInfo += "Album: " + album;
-        }
-
-        artistAlbumLabel->setText(artInfo);
-    }
-    else
-    {
-        currentTrackLabel->setText("No Track Playing");
-        artistAlbumLabel->setText("");
-    }
-}
-// Helper function to format time
-std::string formatTime(int seconds)
-{
-    int minutes = seconds / 60;
-    seconds %= 60;
-
-    std::string result = std::to_string(minutes) + ":";
-    if (seconds < 10)
-        result += "0";
-    result += std::to_string(seconds);
-
-    return result;
+    // Update UI based on current playback state
+    playPauseButton->setText(isPlaying ? "||" : "▶");
 }
 
 void PlayerView::updateProgress(int currentPosition, int duration)
 {
-    // Update progress bar
-    if (duration > 0)
-    {
-        progressBar->setValue(static_cast<float>(currentPosition) / duration);
-    }
-    else
-    {
+    // Format time as mm:ss
+    int currMin = currentPosition / 60;
+    int currSec = currentPosition % 60;
+
+    int totalMin = duration / 60;
+    int totalSec = duration % 60;
+    std::string timeText = std::to_string(currMin) + ":" +
+                           (currSec < 10 ? "0" : "") + std::to_string(currSec);
+    currentTimeLabel->setText(timeText);
+
+    timeText = std::to_string(totalMin) + ":" +
+               (totalSec < 10 ? "0" : "") + std::to_string(totalSec);
+    totalTimeLabel->setText(timeText);
+
+    // Update progress bar if not being dragged
+
+    // -1,-1 is a proxy for "not being dragged"
+
+    if (duration == 0)
         progressBar->setValue(0);
-    }
-
-    // Update time label
-    std::string timeText = formatTime(currentPosition) + " / " + formatTime(duration);
-    timeLabel->setText(timeText);
+    else
+        progressBar->setValue(static_cast<float>(currentPosition) / duration);
 }
-
 
 void PlayerView::updateVolume(int volume)
 {
     volumeSlider->setVolume(volume);
 }
-// MetadataView definitions
-MetadataView::MetadataView(ApplicationController *controller)
-    : View(controller), currentFile(nullptr), isEditing(false)
+
+// MetadataView Implementation
+MetadataView::MetadataView(MetadataController *controller)
+    : controller(controller), isEditing(false), currentFile(nullptr)
 {
+    viewBounds = {760, 20, 220, 500};
+    // Create title labels
+    TextComponent *titleLabel = new TextComponent(770, 30, 200, 15, "Metadata");
 
-    // Create title label
-    Label *titleLabel = new Label(20, 20, 760, 30, "Media File Metadata");
-    titleLabel->setTextColor({255, 255, 255, 255});
+    // Add "Edit" button to enter edit mode
+    editButton = new Button(925, 485, 50, 30, "Edit");
 
-    // Create buttons
-    saveButton = new Button(580, 520, 100, 40, "Save");
-    saveButton->setOnClick([this]()
-                           { saveChanges(); });
+    // Create buttons for edit mode (initially hidden)
+    saveButton = new Button(880, 485, 95, 30, "Save");
 
-    cancelButton = new Button(460, 520, 100, 40, "Cancel");
-    cancelButton->setOnClick([this]()
-                             { cancelChanges(); });
+    cancelButton = new Button(765, 485, 95, 30, "Cancel");
 
-    addFieldButton = new Button(340, 520, 100, 40, "Add Field");
-    addFieldButton->setOnClick([this]()
-                               { addField(); });
+    addFieldButton = new Button(880, 450, 95, 30, "Add key");
 
-    removeFieldButton = new Button(220, 520, 100, 40, "Remove");
-    removeFieldButton->setOnClick([this]()
-                                  { removeSelectedField(); });
+    removeFieldButton = new Button(765, 450, 95, 30, "Remove key");
 
-    // Add components
     addComponent(titleLabel);
+    addComponent(editButton);
     addComponent(saveButton);
     addComponent(cancelButton);
     addComponent(addFieldButton);
     addComponent(removeFieldButton);
 
-    // Initially hide edit buttons
+    titleLabel->setAlign(TextComponent::TextAlign::Center);
+
     saveButton->setVisible(false);
     cancelButton->setVisible(false);
     addFieldButton->setVisible(false);
@@ -1809,389 +496,379 @@ MetadataView::MetadataView(ApplicationController *controller)
 
 MetadataView::~MetadataView()
 {
-    // Clean up key/value fields
-    for (auto label : keyLabels)
-    {
-        delete label;
-    }
-    keyLabels.clear();
+    // Base destructor will handle component deletion
+}
 
-    for (auto field : valueFields)
-    {
-        delete field;
-    }
-    valueFields.clear();
+void MetadataView::setMetadataController(MetadataController *controller)
+{
+    this->controller = controller;
+    editButton->setOnClick(
+        [this]()
+        {
+            enterEditMode();
+            this->controller->enterEditMode();
+        });
+    saveButton->setOnClick(
+        [this]()
+        {
+            saveChanges();
+            this->controller->saveMetadata();
+            this->controller->exitEditMode();
+        });
+    cancelButton->setOnClick(
+        [this]()
+        {
+            cancelChanges();
+            this->controller->discardChanges();
+            this->controller->exitEditMode();
+        });
+    addFieldButton->setOnClick([this]()
+                               { addField(); });
+    removeFieldButton->setOnClick([this]()
+                                  { removeSelectedField(); });
 }
 
 void MetadataView::render(SDL_Renderer *renderer)
 {
-    // Set background color
-    SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-    SDL_Rect fullRect = {0, 0, 800, 600};
-    SDL_RenderFillRect(renderer, &fullRect);
-
-    // Render metadata fields and other components
+    // Render components
     View::render(renderer);
 }
 
 bool MetadataView::handleEvent(SDL_Event *event)
 {
-    // Handle events for the view components
     return View::handleEvent(event);
 }
 
 void MetadataView::update()
 {
-    // Update components based on controller state
-    if (currentFile && controller)
-    {
-        auto metadataController = controller->getMetadataController();
-        if (metadataController)
-        {
-            // Update the metadata display
-            showMetadata(currentFile);
-        }
-    }
+    // Nothing specific to update regularly
 }
 
-void MetadataView::showMetadata(MediaFileModel *file)
+void MetadataView::showMetadata(const std::map<std::string, std::string> &metadata)
 {
-    currentFile = file;
-
-    // Clear previous fields
-    for (auto label : keyLabels)
+    show();
+    // Clear previous metadata fields
+    for (auto &label : keyLabels)
     {
-        removeComponent(label);
         delete label;
+        removeComponent(label);
+    }
+    for (auto &field : valueFields)
+    {
+        delete field;
+        removeComponent(field);
     }
     keyLabels.clear();
-
-    for (auto field : valueFields)
-    {
-        removeComponent(field);
-        delete field;
-    }
     valueFields.clear();
 
-    if (!file)
-        return;
+    // Add metadata key-value pairs
+    int yPos = 60;
 
-    // Create header for file information
-    Label *fileNameLabel = new Label(20, 60, 760, 30, "File: " + file->getFilename());
-    fileNameLabel->setTextColor({255, 255, 255, 255});
-    addComponent(fileNameLabel);
-    keyLabels.push_back(fileNameLabel);
-
-    // Get metadata from file
-    const auto &metadata = file->getAllMetadata();
-    int yPos = 100;
-
-    // Create key-value pairs
-    for (const auto &pair : metadata)
+    // Title
     {
-        Label *keyLabel = new Label(20, yPos, 200, 30, pair.first + ":");
-        keyLabel->setTextColor({200, 200, 200, 255});
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Title");
         addComponent(keyLabel);
         keyLabels.push_back(keyLabel);
 
-        TextField *valueField = new TextField(230, yPos, 550, 30, pair.second);
-        valueField->setEnabled(isEditing);
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Title"));
+        valueField->setEnabled(false);
         addComponent(valueField);
         valueFields.push_back(valueField);
-
-        yPos += 40;
+        yPos += 35;
     }
-
-    // Show/hide edit buttons based on mode
-    saveButton->setVisible(isEditing);
-    cancelButton->setVisible(isEditing);
-    addFieldButton->setVisible(isEditing);
-    removeFieldButton->setVisible(isEditing);
-
-    // Add edit button if not in edit mode
-    if (!isEditing)
     {
-        editButton = new Button(680, 520, 100, 40, "Edit");
-        editButton->setOnClick([this]()
-                               { enterEditMode(); });
-        addComponent(editButton);
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Artist");
+        addComponent(keyLabel);
+        keyLabels.push_back(keyLabel);
+
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Artist"));
+        valueField->setEnabled(false);
+        addComponent(valueField);
+        valueFields.push_back(valueField);
+        yPos += 35;
     }
+    {
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Album");
+        addComponent(keyLabel);
+        keyLabels.push_back(keyLabel);
+
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Album"));
+        valueField->setEnabled(false);
+        addComponent(valueField);
+        valueFields.push_back(valueField);
+        yPos += 35;
+    }
+    {
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Comment");
+        addComponent(keyLabel);
+        keyLabels.push_back(keyLabel);
+
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Comment"));
+        valueField->setEnabled(false);
+        addComponent(valueField);
+        valueFields.push_back(valueField);
+        yPos += 35;
+    }
+    {
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Genre");
+        addComponent(keyLabel);
+        keyLabels.push_back(keyLabel);
+
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Genre"));
+        valueField->setEnabled(false);
+        addComponent(valueField);
+        valueFields.push_back(valueField);
+        yPos += 35;
+    }
+    {
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Year");
+        addComponent(keyLabel);
+        keyLabels.push_back(keyLabel);
+
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Year"));
+        valueField->setEnabled(false);
+        addComponent(valueField);
+        valueFields.push_back(valueField);
+        yPos += 35;
+    }
+    {
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Track");
+        addComponent(keyLabel);
+        keyLabels.push_back(keyLabel);
+
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Track"));
+        valueField->setEnabled(false);
+        addComponent(valueField);
+        valueFields.push_back(valueField);
+        yPos += 35;
+    }
+    {
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Bitrate");
+        addComponent(keyLabel);
+        keyLabels.push_back(keyLabel);
+
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Bitrate"));
+        valueField->setEnabled(false);
+        addComponent(valueField);
+        valueFields.push_back(valueField);
+        yPos += 35;
+    }
+    {
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Channels");
+        addComponent(keyLabel);
+        keyLabels.push_back(keyLabel);
+
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Channels"));
+        valueField->setEnabled(false);
+        addComponent(valueField);
+        valueFields.push_back(valueField);
+        yPos += 35;
+    }
+    {
+        TextComponent *keyLabel = new TextComponent(770, yPos, 60, 30, "Sample Rate");
+        addComponent(keyLabel);
+        keyLabels.push_back(keyLabel);
+
+        TextField *valueField = new TextField(840, yPos, 130, 30, metadata.at("Sample Rate"));
+        valueField->setEnabled(false);
+        addComponent(valueField);
+        valueFields.push_back(valueField);
+        yPos += 35;
+    }
+    // Reset edit mode
+    isEditing = false;
+    saveButton->setVisible(false);
+    cancelButton->setVisible(false);
+    addFieldButton->setVisible(false);
+    removeFieldButton->setVisible(false);
+    editButton->setVisible(true);
 }
 
 void MetadataView::enterEditMode()
 {
     isEditing = true;
 
-    // Enable editing for all value fields
-    for (auto field : valueFields)
+    // Enable all text fields for editing
+    for (auto field = valueFields.begin(); field < valueFields.begin() + 7; ++field)
     {
-        field->setEnabled(true);
+        (*field)->setEnabled(true);
     }
 
-    // Update button visibility
+    // Show edit mode buttons
     saveButton->setVisible(true);
     cancelButton->setVisible(true);
     addFieldButton->setVisible(true);
     removeFieldButton->setVisible(true);
 
-    // Remove the edit button
-    for (size_t i = 0; i < keyLabels.size(); i++)
-    {
-        if (dynamic_cast<Button *>(keyLabels[i]))
-        {
-            removeComponent(keyLabels[i]);
-            delete keyLabels[i];
-            keyLabels.erase(keyLabels.begin() + i);
-            break;
-        }
-    }
-
-    // Notify controller
-    if (controller)
-    {
-        auto metadataController = controller->getMetadataController();
-        if (metadataController)
-        {
-            metadataController->enterEditMode();
-        }
-    }
+    // Hide edit button
+    editButton->setVisible(false);
 }
 
 void MetadataView::saveChanges()
 {
-    if (!currentFile)
-        return;
-
-    // Get current metadata
-    const auto &metadata = currentFile->getAllMetadata();
-    auto iter = metadata.begin();
-
-    // Update metadata with new values
-    for (size_t i = 0; i < valueFields.size() && iter != metadata.end(); i++, iter++)
-    {
-        currentFile->setMetadata(iter->first, valueFields[i]->getText());
-    }
-
-    // Save through controller
-    if (controller)
-    {
-        auto metadataController = controller->getMetadataController();
-        if (metadataController)
-        {
-            metadataController->saveMetadata();
-        }
-    }
-
-    // Exit edit mode
+    // Switch back to view mode
     isEditing = false;
-    showMetadata(currentFile);
+
+    // Disable all text fields
+    for (auto field = valueFields.begin(); field < valueFields.begin() + 7; ++field)
+    {
+        (*field)->setEnabled(false);
+    }
+
+    // Hide edit mode buttons
+    saveButton->setVisible(false);
+    cancelButton->setVisible(false);
+    addFieldButton->setVisible(false);
+    removeFieldButton->setVisible(false);
+
+    // Show edit button
+    editButton->setVisible(true);
 }
 
 void MetadataView::cancelChanges()
 {
+    // Switch back to view mode without saving
     isEditing = false;
 
-    // Revert to original metadata
-    if (controller)
+    // Disable all text fields
+    for (auto &field : valueFields)
     {
-        auto metadataController = controller->getMetadataController();
-        if (metadataController)
-        {
-            metadataController->discardChanges();
-        }
+        field->setEnabled(false);
     }
 
-    // Refresh display
-    showMetadata(currentFile);
+    // Hide edit mode buttons
+    saveButton->setVisible(false);
+    cancelButton->setVisible(false);
+    addFieldButton->setVisible(false);
+    removeFieldButton->setVisible(false);
+
+    // Show edit button
+    editButton->setVisible(true);
 }
 
 void MetadataView::addField()
 {
-    if (!isEditing || !currentFile)
-        return;
+    // This would create a dialog to add a new field
+    // For simplicity, we'll just add a new field at the end
+    int yPos = 200 + (keyLabels.size() - 1) * 40;
 
-    // Add new key-value pair to UI
-    int yPos = 100 + 40 * keyLabels.size();
+    TextComponent *newKeyLabel = new TextComponent(770, yPos, 150, 30, "New Key");
+    addComponent(newKeyLabel);
+    keyLabels.push_back(newKeyLabel);
 
-    // Use a placeholder key name
-    std::string newKey = "New Field";
-    int counter = 1;
-
-    // Ensure key is unique
-    const auto &metadata = currentFile->getAllMetadata();
-    while (metadata.find(newKey) != metadata.end())
-    {
-        newKey = "New Field " + std::to_string(counter++);
-    }
-
-    Label *keyLabel = new Label(20, yPos, 200, 30, newKey + ":");
-    keyLabel->setTextColor({200, 200, 200, 255});
-    addComponent(keyLabel);
-    keyLabels.push_back(keyLabel);
-
-    TextField *valueField = new TextField(230, yPos, 550, 30, "");
-    valueField->setEnabled(true);
-    addComponent(valueField);
-    valueFields.push_back(valueField);
-
-    // Add to metadata
-    currentFile->setMetadata(newKey, "");
+    TextField *newValueField = new TextField(870, yPos, 150, 30, "New Value");
+    newValueField->setEnabled(true);
+    addComponent(newValueField);
+    valueFields.push_back(newValueField);
 }
 
 void MetadataView::removeSelectedField()
 {
-    if (!isEditing || valueFields.empty())
-        return;
-
-    // Find focused field
-    int selectedIndex = -1;
-    for (size_t i = 0; i < valueFields.size(); i++)
-    {
-        if (valueFields[i]->isEnabled() && valueFields[i]->containsPoint(
-                                               SDL_GetMouseState(nullptr, nullptr), SDL_GetMouseState(nullptr, nullptr)))
-        {
-            selectedIndex = i;
-            break;
-        }
-    }
-
-    if (selectedIndex >= 0)
-    {
-        // Get the key to remove
-        std::string keyToRemove;
-        const auto &metadata = currentFile->getAllMetadata();
-        auto iter = metadata.begin();
-        for (int i = 0; i < selectedIndex && iter != metadata.end(); i++, iter++)
-        {
-        }
-
-        if (iter != metadata.end())
-        {
-            keyToRemove = iter->first;
-
-            // Remove from metadata
-            if (controller)
-            {
-                auto metadataController = controller->getMetadataController();
-                if (metadataController)
-                {
-                    metadataController->removeField(keyToRemove);
-                }
-            }
-
-            // Remove UI elements
-            removeComponent(keyLabels[selectedIndex]);
-            delete keyLabels[selectedIndex];
-            keyLabels.erase(keyLabels.begin() + selectedIndex);
-
-            removeComponent(valueFields[selectedIndex]);
-            delete valueFields[selectedIndex];
-            valueFields.erase(valueFields.begin() + selectedIndex);
-
-            // Reposition remaining fields
-            for (size_t i = selectedIndex; i < keyLabels.size(); i++)
-            {
-                int yPos = 100 + 40 * i;
-                keyLabels[i]->setBounds(20, yPos, 200, 30);
-                valueFields[i]->setBounds(230, yPos, 550, 30);
-            }
-        }
-    }
+    // This would show a dialog to select which field to remove
+    // For simplicity, we'll just show a message
+    // In a real implementation, this would prompt for which field to edit/remove
 }
 
-// PlaylistsListView definitions
-PlaylistsListView::PlaylistsListView(ApplicationController *controller)
-    : View(controller)
+// PlaylistsListView Implementation
+PlaylistsListView::PlaylistsListView(PlaylistsListController *controller) : controller(controller)
 {
+    viewBounds = {20, 20, 200, 500};
+    // Create list view for playlists
+    playlistsList = new ListView(25, 50, 190, 430);
 
     // Create title label
-    Label *titleLabel = new Label(20, 20, 760, 30, "Playlists");
-    titleLabel->setTextColor({255, 255, 255, 255});
+    titleLabel = new TextComponent(90, 25, 65, 15, "Playlists");
 
-    // Create playlist list view
-    playlistsList = new ListView(20, 70, 760, 400);
-    playlistsList->setOnSelectionChanged([this](int index)
-                                         {
-        // Update button states based on selection
-        openPlaylistButton->setEnabled(index >= 0);
-        deletePlaylistButton->setEnabled(index >= 0); });
+    // Create pagination (initially hidden)
+    pagination = new Pagination(25, 410, 190, 30);
 
-    // Create playlist name field for new playlists
-    playlistNameField = new TextField(20, 480, 400, 30, "");
-    playlistNameField->setPlaceholder("New playlist name");
+    playlistNameField = new TextField(25, 410, 190, 30, "");
 
-    // Create buttons
-    newPlaylistButton = new Button(430, 480, 120, 30, "Create Playlist");
-    newPlaylistButton->setOnClick([this]()
-                                  { createNewPlaylist(); });
+    // Create Create playlist button
+    createButton = new Button(25, 445, 190, 30, "Create");
 
-    deletePlaylistButton = new Button(560, 480, 100, 30, "Delete");
-    deletePlaylistButton->setOnClick([this]()
-                                     { deleteSelectedPlaylist(); });
-    deletePlaylistButton->setEnabled(false);
-
-    openPlaylistButton = new Button(670, 480, 110, 30, "Open");
-    openPlaylistButton->setOnClick([this]()
-                                   { openSelectedPlaylist(); });
-    openPlaylistButton->setEnabled(false);
-
-    // Add back button
-    Button *backButton = new Button(20, 530, 100, 40, "Back");
-    backButton->setOnClick([this, &controller]()
-                           {
-        if (controller) {
-            controller->navigateToMainMenu();
-        } });
-
-    // Add components
     addComponent(titleLabel);
     addComponent(playlistsList);
+    addComponent(pagination);
+    addComponent(createButton);
     addComponent(playlistNameField);
-    addComponent(newPlaylistButton);
-    addComponent(deletePlaylistButton);
-    addComponent(openPlaylistButton);
-    addComponent(backButton);
+
+    titleLabel->setAlign(TextComponent::TextAlign::Center);
+
+    playlistNameField->setPlaceholder("New playlist name");
+    playlistNameField->setVisible(false);
+
+    pagination->setVisible(false);
+
+    show();
 }
 
 PlaylistsListView::~PlaylistsListView()
 {
-    // Components will be cleaned up by parent View destructor
+    // Base destructor will handle component deletion
+}
+
+void PlaylistsListView::setPlaylistsListController(PlaylistsListController *controller)
+{
+    this->controller = controller;
+    playlistsList->setOnSelectionChanged(
+        [this](int index)
+        { this->controller->handlePlaylistSelected(index); });
+    createButton->setOnClick(
+        [this]()
+        {
+            if (playlistNameField->isVisible())
+                playlistNameField->setVisible(false);
+            else
+                this->createNewPlaylist();
+        });
+    // Set callback for when the user presses Enter
+    playlistNameField->setOnTextChanged(
+        [this](const std::string &text)
+        {
+            if (!text.empty())
+            {
+                // Call controller to create playlist
+                playlistNameField->setVisible(false);
+                this->controller->createPlaylist(text);
+                playlistNameField->setPlaceholder("New playlist name");
+            }
+        });
 }
 
 void PlaylistsListView::render(SDL_Renderer *renderer)
 {
-    // Set background color
-    SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-    SDL_Rect fullRect = {0, 0, 800, 600};
-    SDL_RenderFillRect(renderer, &fullRect);
 
-    // Render playlists list and other components
+    // Render components
     View::render(renderer);
 }
 
 bool PlaylistsListView::handleEvent(SDL_Event *event)
 {
-    // Handle events for the view components
+    if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_RIGHT)
+    {
+        int x = event->button.x;
+        int y = event->button.y;
+
+        if (playlistsList->containsPoint(x, y))
+        {
+            // Show context menu for the playlist
+            // This would be implemented based on your context menu system
+            return true;
+        }
+    }
+
     return View::handleEvent(event);
 }
 
 void PlaylistsListView::update()
 {
-    // Update playlist list from controller
-    if (controller)
-    {
-        auto playlistController = controller->getPlaylistController();
-        if (playlistController)
-        {
-            playlistController->updatePlaylistsListView();
-        }
-    }
+    // Nothing specific to update regularly
 }
 
 void PlaylistsListView::setPlaylists(const std::vector<std::string> &playlistNames)
 {
     playlistsList->clearItems();
-
     for (const auto &name : playlistNames)
     {
         playlistsList->addItem(name);
@@ -2205,539 +882,324 @@ int PlaylistsListView::getSelectedPlaylist() const
 
 void PlaylistsListView::createNewPlaylist()
 {
-    std::string name = playlistNameField->getText();
-    if (name.empty())
-    {
-        // Show error or use default name
-        name = "New Playlist " + std::to_string(playlistsList->size() + 1);
-    }
-
-    if (controller)
-    {
-        auto playlistController = controller->getPlaylistController();
-        if (playlistController)
-        {
-            playlistController->createPlaylist(name);
-            playlistNameField->setText("");
-
-            // Refresh playlists
-            update();
-        }
-    }
+    // Create text field for new playlist name
+    // Show text field for entering new playlist name
+    playlistNameField->setVisible(true);
+    playlistNameField->focus();
 }
 
 void PlaylistsListView::deleteSelectedPlaylist()
 {
-    int index = playlistsList->getSelectedIndex();
-    if (index >= 0)
+    int selectedIndex = playlistsList->getSelectedIndex();
+    if (selectedIndex >= 0)
     {
-        if (controller)
-        {
-            auto playlistController = controller->getPlaylistController();
-            if (playlistController)
-            {
-                playlistController->deletePlaylist(index);
-
-                // Refresh playlists
-                update();
-            }
-        }
+        // Call controller to delete playlist
+        // controller->deletePlaylist(selectedIndex);
+        playlistsList->removeItem(selectedIndex);
     }
 }
 
 void PlaylistsListView::openSelectedPlaylist()
 {
-    int index = playlistsList->getSelectedIndex();
-    if (index >= 0)
+    int selectedIndex = playlistsList->getSelectedIndex();
+    if (selectedIndex >= 0)
     {
-        if (controller)
-        {
-            auto playlistController = controller->getPlaylistController();
-            if (playlistController)
-            {
-                playlistController->loadPlaylist(index);
-                playlistController->viewPlaylistContent(playlistsList->getItem(index));
-            }
-        }
     }
 }
 
-// USBView definitions
-USBView::USBView(ApplicationController *controller)
-    : View(controller), deviceMounted(false)
-{
+// Main Window implementation
 
-    // Create title label
-    Label *titleLabel = new Label(20, 20, 760, 30, "USB Devices");
-    titleLabel->setTextColor({255, 255, 255, 255});
-
-    // Create USB devices list
-    usbDevicesList = new ListView(20, 70, 760, 400);
-    usbDevicesList->setOnSelectionChanged([this](int index)
-                                          {
-        // Update button states based on selection and mount status
-        if (index >= 0) {
-            mountButton->setEnabled(!deviceMounted);
-            unmountButton->setEnabled(deviceMounted);
-        } else {
-            mountButton->setEnabled(false);
-            unmountButton->setEnabled(false);
-        } });
-
-    // Create status label
-    statusLabel = new Label(20, 480, 760, 30, "Select a USB device to mount");
-    statusLabel->setTextColor({200, 200, 200, 255});
-
-    // Create buttons
-    mountButton = new Button(580, 520, 100, 40, "Mount");
-    mountButton->setEnabled(false);
-    mountButton->setOnClick([this]()
-                            { mountSelectedDevice(); });
-
-    unmountButton = new Button(690, 520, 100, 40, "Unmount");
-    unmountButton->setEnabled(false);
-    unmountButton->setOnClick([this]()
-                              { unmountDevice(); });
-
-    // Add refresh button
-    Button *refreshButton = new Button(470, 520, 100, 40, "Refresh");
-    refreshButton->setOnClick([this, &controller]()
-                              {
-        if (controller) {
-            auto usbController = controller->getUSBController();
-            if (usbController) {
-                usbController->detectUSBDevices();
-            }
-        } });
-
-    // Add back button
-    Button *backButton = new Button(20, 520, 100, 40, "Back");
-    backButton->setOnClick([this, &controller]()
-                           {
-        if (controller) {
-            controller->navigateToMainMenu();
-        } });
-
-    // Add components
-    addComponent(titleLabel);
-    addComponent(usbDevicesList);
-    addComponent(statusLabel);
-    addComponent(mountButton);
-    addComponent(unmountButton);
-    addComponent(refreshButton);
-    addComponent(backButton);
-}
-
-USBView::~USBView()
-{
-    // Components will be cleaned up by parent View destructor
-}
-
-void USBView::render(SDL_Renderer *renderer)
-{
-    // Set background color
-    SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-    SDL_Rect fullRect = {0, 0, 800, 600};
-    SDL_RenderFillRect(renderer, &fullRect);
-
-    // Render USB devices list and other components
-    View::render(renderer);
-}
-
-bool USBView::handleEvent(SDL_Event *event)
-{
-    // Handle events for the view components
-    return View::handleEvent(event);
-}
-
-void USBView::update()
-{
-    // Update from controller
-    if (controller)
-    {
-        auto usbController = controller->getUSBController();
-        if (usbController)
-        {
-            // Refresh USB devices list
-            usbController->detectUSBDevices();
-        }
-    }
-}
-
-void USBView::updateDeviceList(const std::vector<std::string> &devices)
-{
-    usbDevicesList->clearItems();
-
-    if (devices.empty())
-    {
-        usbDevicesList->addItem("No USB devices detected");
-        mountButton->setEnabled(false);
-        unmountButton->setEnabled(false);
-        statusLabel->setText("No USB devices detected");
-    }
-    else
-    {
-        for (const auto &device : devices)
-        {
-            usbDevicesList->addItem(device);
-        }
-        statusLabel->setText("Select a USB device to mount");
-    }
-}
-
-void USBView::setMountStatus(bool isMounted)
-{
-    deviceMounted = isMounted;
-
-    mountButton->setEnabled(!deviceMounted && usbDevicesList->getSelectedIndex() >= 0);
-    unmountButton->setEnabled(deviceMounted);
-
-    if (deviceMounted)
-    {
-        statusLabel->setText("Device mounted. USB content available for browsing.");
-    }
-    else
-    {
-        statusLabel->setText("Device not mounted. Select a USB device to mount.");
-    }
-}
-
-void USBView::mountSelectedDevice()
-{
-    int index = usbDevicesList->getSelectedIndex();
-    if (index >= 0)
-    {
-        std::string deviceName = usbDevicesList->getItem(index);
-
-        if (controller)
-        {
-            auto usbController = controller->getUSBController();
-            if (usbController)
-            {
-                bool success = usbController->mountUSB(deviceName);
-
-                if (success)
-                {
-                    setMountStatus(true);
-                    // Scan USB contents
-                    usbController->scanUSBContents(deviceName);
-                }
-                else
-                {
-                    statusLabel->setText("Failed to mount USB device");
-                }
-            }
-        }
-    }
-}
-
-void USBView::unmountDevice()
-{
-    int index = usbDevicesList->getSelectedIndex();
-    if (index >= 0 && deviceMounted)
-    {
-        std::string deviceName = usbDevicesList->getItem(index);
-
-        if (controller)
-        {
-            auto usbController = controller->getUSBController();
-            if (usbController)
-            {
-                bool success = usbController->unmountUSB(deviceName);
-
-                if (success)
-                {
-                    setMountStatus(false);
-                }
-                else
-                {
-                    statusLabel->setText("Failed to unmount USB device");
-                }
-            }
-        }
-    }
-}
-
-// MainWindow definitions
-MainWindow::MainWindow(ApplicationController *appController)
-    : window(nullptr), renderer(nullptr), currentView(nullptr),
-      controller(appController), miniPlayerView(nullptr), showingDialog(false),
-      dialogLabel(nullptr), dialogOkButton(nullptr)
+MainWindow::MainWindow(int width, int height, std::string title)
+    : width(width), height(height), title(title),
+      window(nullptr), exitRequested(false), is_dragging_corner(false)
 {
 }
-
 MainWindow::~MainWindow()
 {
-    cleanup();
+    if (window)
+    {
+        SDL_DestroyWindow(window);
+        window = nullptr;
+    }
+}
+SDL_Window *MainWindow::initialize()
+{
+    // Create window
+    window = SDL_CreateWindow(
+        title.c_str(),
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        width, height,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+
+    return window;
+}
+int MainWindow::getWidth() { return width; }
+int MainWindow::getHeight() { return height; }
+bool MainWindow::getExitRequest() const { return exitRequested; }
+SDL_Window *MainWindow::getWindow() { return window; }
+
+bool MainWindow::is_mouse_in_corner(SDL_Window *window, int mouse_x, int mouse_y)
+{
+    int window_width, window_height;
+    SDL_GetWindowSize(window, &window_width, &window_height);
+
+    // Check bottom-right corner
+    return (mouse_x >= window_width - CORNER_DETECTION_AREA &&
+            mouse_y >= window_height - CORNER_DETECTION_AREA);
 }
 
-bool MainWindow::initialize(const std::string &title, int width, int height)
+void MainWindow::updatePolling(SDL_Event &event)
 {
-    // Initialize SDL subsystems
+    switch (event.type)
+    {
+    case SDL_QUIT:
+        exitRequested = true;
+        break;
+
+    case SDL_MOUSEBUTTONDOWN:
+        if (event.button.button == SDL_BUTTON_LEFT)
+        {
+            int mouse_x = event.button.x;
+            int mouse_y = event.button.y;
+
+            if (is_mouse_in_corner(window, mouse_x, mouse_y))
+            {
+                is_dragging_corner = true;
+                last_mouse_x = mouse_x;
+                last_mouse_y = mouse_y;
+
+                // Set a custom cursor if desired
+                SDL_Cursor *arrowCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENWSE);
+                SDL_SetCursor(arrowCursor);
+            }
+            else
+            {
+            }
+        }
+        break;
+
+    case SDL_MOUSEBUTTONUP:
+        if (event.button.button == SDL_BUTTON_LEFT && is_dragging_corner)
+        {
+            is_dragging_corner = false;
+
+            // Reset cursor
+            SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW));
+        }
+        break;
+
+    case SDL_MOUSEMOTION:
+        if (is_dragging_corner)
+        {
+            int mouse_x = event.motion.x;
+            int mouse_y = event.motion.y;
+
+            // Calculate the change in position
+            int dx = mouse_x - last_mouse_x;
+            int dy = mouse_y - last_mouse_y;
+
+            // Update window size
+            width += dx;
+            height += dy;
+
+            // Enforce minimum size
+            if (width < 200)
+                width = 200;
+            if (height < 200)
+                height = 200;
+
+            // Resize the window
+            SDL_SetWindowSize(window, width, height);
+
+            // Update last mouse position
+            last_mouse_x = mouse_x;
+            last_mouse_y = mouse_y;
+        }
+        else if (is_mouse_in_corner(window, event.motion.x, event.motion.y))
+        {
+            // Show resize cursor when hovering over corner
+            SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENWSE));
+        }
+        else
+        {
+            // Reset cursor
+            SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW));
+        }
+    }
+}
+
+// View Manager implementation
+ViewManager::ViewManager()
+    : renderer(nullptr),
+      mainWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Media Player"),
+      showingDialog(false),
+      dialogTimer(0)
+{
+}
+
+ViewManager::~ViewManager()
+{
+
+    // Destroy SDL components
+    if (renderer)
+    {
+        SDL_DestroyRenderer(renderer);
+        renderer = nullptr;
+    }
+}
+
+bool ViewManager::initialize()
+{
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
     {
+        std::cerr << "SDL could not initialize! SDL Error: " << SDL_GetError() << std::endl;
         return false;
     }
 
     // Initialize SDL_ttf
     if (TTF_Init() < 0)
     {
+        std::cerr << "SDL_ttf could not initialize! TTF Error: " << TTF_GetError() << std::endl;
         return false;
     }
-
-    // Initialize SDL_image
-    int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
-    if (!(IMG_Init(imgFlags) & imgFlags))
+    if (!mainWindow.initialize())
     {
-        return false;
-    }
-
-    // Create window
-    window = SDL_CreateWindow(
-        title.c_str(),
-        SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        width, height,
-        SDL_WINDOW_SHOWN);
-
-    if (window == nullptr)
-    {
+        std::cerr << "Window could not be created! SDL Error: " << SDL_GetError() << std::endl;
         return false;
     }
 
     // Create renderer
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (renderer == nullptr)
+    renderer = SDL_CreateRenderer(mainWindow.getWindow(), -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!renderer)
     {
+        std::cerr << "Renderer could not be created! SDL Error: " << SDL_GetError() << std::endl;
         return false;
     }
+    // Initialize renderer color
+    SDL_SetRenderDrawColor(renderer, BACKGROUND_COLOR.r, BACKGROUND_COLOR.g, BACKGROUND_COLOR.b, BACKGROUND_COLOR.a);
 
-    // Set up mini player (always visible at bottom of screen)
-    miniPlayerView = new PlayerView(controller);
-    miniPlayerView->setBounds(0, height - 50, width, 50);
+    // Create views
+    mediaListView = std::make_unique<MediaListView>(nullptr);         // Will be set later
+    playerView = std::make_unique<PlayerView>(nullptr);               // Will be set later
+    playlistsListView = std::make_unique<PlaylistsListView>(nullptr); // Will be set later
+    metadataView = std::make_unique<MetadataView>(nullptr);           // Will be set later
 
-    // Set up dialog components
-    dialogLabel = new Label(width / 2 - 150, height / 2 - 40, 300, 30, "");
-    dialogLabel->setVisible(false);
+    appController = std::make_unique<ApplicationController>(this);
+    appController->initialize(mediaListView.get(), playerView.get(), playlistsListView.get(), metadataView.get());
 
-    dialogOkButton = new Button(width / 2 - 50, height / 2 + 10, 100, 30, "OK");
-    dialogOkButton->setVisible(false);
-    dialogOkButton->setOnClick([this]()
-                               { hideDialog(); });
+    mediaListView->setMediaListController(appController->getMediaListController());
+    playerView->setPlayerController(appController->getPlayerController());
+    playlistsListView->setPlaylistsListController(appController->getPlaylistsListController());
+    metadataView->setMetadataController(appController->getMetadataController());
 
     return true;
 }
 
-void MainWindow::cleanup()
+void ViewManager::handleEvents()
 {
-    // Clean up views
-    for (auto &pair : views)
+    SDL_Event event;
+
+    while (SDL_PollEvent(&event))
     {
-        delete pair.second;
+        mainWindow.updatePolling(event);
+        if (shouldExit())
+            break;
+
+        mediaListView->handleEvent(&event);
+        playerView->handleEvent(&event);
+        playlistsListView->handleEvent(&event);
+        metadataView->handleEvent(&event);
+        // Handle dialog events first if showing
+        if (showingDialog)
+        {
+            if (event.type == SDL_MOUSEBUTTONDOWN)
+            {
+                // Any click dismisses dialog
+                showingDialog = false;
+                dialogTimer = 0;
+                continue;
+            }
+            // Don't process other events while dialog is showing
+            continue;
+        }
     }
-    views.clear();
-
-    // Clean up mini player
-    delete miniPlayerView;
-    miniPlayerView = nullptr;
-
-    // Clean up dialog components
-    delete dialogLabel;
-    dialogLabel = nullptr;
-
-    delete dialogOkButton;
-    dialogOkButton = nullptr;
-
-    // Clean up SDL resources
-    if (renderer)
-    {
-        SDL_DestroyRenderer(renderer);
-        renderer = nullptr;
-    }
-
-    if (window)
-    {
-        SDL_DestroyWindow(window);
-        window = nullptr;
-    }
-
-    // Quit SDL subsystems
-    IMG_Quit();
-    TTF_Quit();
-    SDL_Quit();
 }
 
-void MainWindow::render()
+void ViewManager::update()
 {
+    // Update dialog timer if showing
+    if (showingDialog)
+    {
+        dialogTimer--;
+        if (dialogTimer <= 0)
+        {
+            showingDialog = false;
+        }
+    }
+}
+
+void ViewManager::render()
+{
+
     // Clear screen
-    SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
+    SDL_SetRenderDrawColor(renderer, BACKGROUND_COLOR.r, BACKGROUND_COLOR.g, BACKGROUND_COLOR.b, BACKGROUND_COLOR.a); // Light gray background
     SDL_RenderClear(renderer);
 
-    // Render current view
-    if (currentView)
-    {
-        currentView->render(renderer);
-    }
+    // Render all active views
+    if (playlistsListView && playlistsListView->isActive())
+        playlistsListView->render(renderer);
 
-    // Render mini player
-    miniPlayerView->render(renderer);
+    if (mediaListView && mediaListView->isActive())
+        mediaListView->render(renderer);
+
+    if (playerView && playerView->isActive())
+        playerView->render(renderer);
+
+    if (metadataView && metadataView->isActive())
+        metadataView->render(renderer);
 
     // Render dialog if showing
     if (showingDialog)
     {
-        // Semi-transparent overlay
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
-        SDL_Rect fullScreen = {0, 0, 800, 600};
-        SDL_RenderFillRect(renderer, &fullScreen);
-
         // Dialog background
-        SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
-        SDL_Rect dialogRect = {300, 200, 200, 100};
+        SDL_SetRenderDrawColor(renderer, 200, 200, 200, 220);
+        SDL_Rect dialogRect = {
+            mainWindow.getWidth() / 4,
+            mainWindow.getHeight() / 3,
+            mainWindow.getWidth() / 2,
+            mainWindow.getHeight() / 4};
         SDL_RenderFillRect(renderer, &dialogRect);
 
         // Dialog border
-        SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderDrawRect(renderer, &dialogRect);
 
-        // Dialog components
-        dialogLabel->render(renderer);
-        dialogOkButton->render(renderer);
+        // Render dialog text using SDL_ttf (implementation omitted for brevity)
+        // You would need to render the dialogMessage using TTF_Font
     }
 
-    // Present rendered content
+    // Update screen
     SDL_RenderPresent(renderer);
 }
 
-void MainWindow::handleEvents()
+void ViewManager::run()
 {
-    SDL_Event event;
-    while (SDL_PollEvent(&event))
-    {
-        if (event.type == SDL_QUIT)
-        {
-            if (controller)
-            {
-                controller->exit();
-            }
-        }
-
-        // Handle dialog events first if showing
-        if (showingDialog)
-        {
-            dialogOkButton->handleEvent(&event);
-            continue;
-        }
-
-        // Handle mini player events
-        bool handled = miniPlayerView->handleEvent(&event);
-
-        // Handle current view events if not handled by mini player
-        if (!handled && currentView)
-        {
-            currentView->handleEvent(&event);
-        }
-
-        // Map keyboard events to user commands
-        if (event.type == SDL_KEYDOWN)
-        {
-            UserCommand cmd = UserCommand::NONE;
-
-            switch (event.key.keysym.sym)
-            {
-            case SDLK_SPACE:
-                cmd = UserCommand::PLAY;
-                break;
-            case SDLK_p:
-                cmd = UserCommand::PAUSE;
-                break;
-            case SDLK_s:
-                cmd = UserCommand::STOP;
-                break;
-            case SDLK_RIGHT:
-                cmd = UserCommand::SEEK_FORWARD;
-                break;
-            case SDLK_LEFT:
-                cmd = UserCommand::SEEK_BACKWARD;
-                break;
-            case SDLK_UP:
-                cmd = UserCommand::VOLUME_UP;
-                break;
-            case SDLK_DOWN:
-                cmd = UserCommand::VOLUME_DOWN;
-                break;
-            case SDLK_n:
-                cmd = UserCommand::NEXT;
-                break;
-            case SDLK_b:
-                cmd = UserCommand::PREVIOUS;
-                break;
-            case SDLK_ESCAPE:
-                cmd = UserCommand::BACK;
-                break;
-            case SDLK_RETURN:
-                cmd = UserCommand::SELECT;
-                break;
-            }
-
-            if (cmd != UserCommand::NONE && controller)
-            {
-                controller->handleUserCommand(cmd);
-            }
-        }
-    }
+    appController->run();
 }
 
-void MainWindow::switchView(const std::string &viewName)
+void ViewManager::showDialog(const std::string &message)
 {
-    auto it = views.find(viewName);
-    if (it != views.end())
-    {
-        if (currentView)
-        {
-            currentView->hide();
-        }
-
-        currentView = it->second;
-        currentView->show();
-        currentView->update();
-    }
-}
-
-void MainWindow::showDialog(const std::string &message)
-{
+    dialogMessage = message;
     showingDialog = true;
-    dialogLabel->setText(message);
-    dialogLabel->setVisible(true);
-    dialogOkButton->setVisible(true);
+    dialogTimer = 180; // Show for about 3 seconds (60 frames/sec * 3)
 }
 
-void MainWindow::hideDialog()
+bool ViewManager::shouldExit() const
 {
-    showingDialog = false;
-    dialogLabel->setVisible(false);
-    dialogOkButton->setVisible(false);
+    return mainWindow.getExitRequest();
 }
 
-SDL_Renderer *MainWindow::getRenderer()
+SDL_Renderer *ViewManager::getRenderer() const
 {
     return renderer;
-}
-
-ApplicationController *MainWindow::getController()
-{
-    return controller;
-}
-
-void MainWindow::addView(const std::string &name, View *view)
-{
-    views[name] = view;
-}
-
-View *MainWindow::getView(const std::string &name)
-{
-    auto it = views.find(name);
-    if (it != views.end())
-    {
-        return it->second;
-    }
-    return nullptr;
 }
